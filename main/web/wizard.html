@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP32 Scream RTP Setup Wizard</title>
+    <link rel="stylesheet" href="wizard.css">
+</head>
+<body>
+    <div id="setup-wizard-overlay" class="wizard-overlay active">
+        <div class="wizard-container">
+            <div class="wizard-header">
+                <h2>ESP32 Scream RTP Setup Wizard</h2>
+                <div class="wizard-progress">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="wizard-progress-fill"></div>
+                    </div>
+                    <span class="step-indicator" id="wizard-step-indicator">Step 1 of 5</span>
+                </div>
+            </div>
+            
+            <div class="wizard-content" id="wizard-content">
+                <!-- Step 1: Mode Selection -->
+                <div class="wizard-step" id="step-1" style="display:none;">
+                    <h3>Step 1: Select Device Mode</h3>
+                    <p>Welcome to ESP32 Scream Setup! Let's configure your device for optimal audio streaming. First, select your device mode:</p>
+
+                    <div class="mode-options">
+                        <div class="mode-option" id="mode-receiver-usb" data-mode="receiver-usb">
+                            <div class="mode-option-title">
+                                <span>🔊 Reciever - USB Host</span>
+                                <span class="mode-option-badge" style="display:none;">Not Available</span>
+                            </div>
+                            <div class="mode-option-description">
+                                <span class="mode-enabled-text">Receive audio from network and output via USB UAC 1.0 DAC</span>
+                                <span class="mode-disabled-text" style="display:none;">USB capability not detected on this device</span>
+                            </div>
+                        </div>
+
+                        <div class="mode-option" id="mode-receiver-spdif" data-mode="receiver-spdif">
+                            <div class="mode-option-title">
+                                <span>🔊 Receiver - S/PDIF</span>
+                                <span class="mode-option-badge" style="display:none;">Not Available</span>
+                            </div>
+                            <div class="mode-option-description">
+                                <span class="mode-enabled-text">Receive audio from network and output via S/PDIF</span>
+                                <span class="mode-disabled-text" style="display:none;">S/PDIF capability not detected on this device</span>
+                            </div>
+                        </div>
+
+                        <div class="mode-option" id="mode-sender-usb" data-mode="sender-usb">
+                            <div class="mode-option-title">
+                                <span>Sender - USB Device</span>
+                                <span class="mode-option-badge" style="display:none;">Not Available</span>
+                            </div>
+                            <div class="mode-option-description">
+                                <span class="mode-enabled-text">Work as a USB sound card with PC/Consoles and stream to network</span>
+                                <span class="mode-disabled-text" style="display:none;">USB capability not detected on this device</span>
+                            </div>
+                        </div>
+
+                        <div class="mode-option" id="mode-sender-spdif" data-mode="sender-spdif">
+                            <div class="mode-option-title">
+                                <span>Sender - SPDIF</span>
+                                <span class="mode-option-badge" style="display:none;">Not Available</span>
+                            </div>
+                            <div class="mode-option-description">
+                                <span class="mode-enabled-text">Capture audio via S/PDIF and stream to network</span>
+                                <span class="mode-disabled-text" style="display:none;">S/PDIF capability not detected on this device</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="validation-error" id="mode-error">Please select a device mode to continue</div>
+                </div>
+
+                <!-- Step 2: Mode-Specific Configuration -->
+                <div class="wizard-step" id="step-2" style="display:none;">
+                    <!-- Sender Configuration -->
+                    <div id="step-2-sender" style="display:none;">
+                        <h3>Step 2: Configure Sender</h3>
+                        <p>Choose a target device to send the audio stream to.</p>
+                        
+                        <div class="receiver-selector">
+                            <label for="receiver-select">Select Target Receiver:</label>
+                            <select id="receiver-select" onchange="selectReceiver(this.value)">
+                                <option value="">-- Scanning for receivers... --</option>
+                            </select>
+                            
+                            <button class="scan-receivers-btn primary" onclick="discoverReceiversForWizard()">
+                                🔄 Scan for Receivers
+                            </button>
+                            
+                            <div id="receiver-status" class="receiver-status" style="display:none;"></div>
+                        </div>
+                        
+                        <div class="wizard-form-group">
+                            <label>
+                                <input type="checkbox" id="manual-ip-check" onchange="toggleManualIP(this.checked)">
+                                Enter IP manually
+                            </label>
+                        </div>
+                        
+                        <div id="manual-ip-entry" style="display:none;">
+                            <div class="wizard-form-group">
+                                <label for="sender-ip">Receiver IP Address:</label>
+                                <input type="text" id="sender-ip" placeholder="192.168.1.100">
+                            </div>
+                            
+                            <div class="wizard-form-group">
+                                <label for="sender-port">Receiver Port:</label>
+                                <input type="number" id="sender-port" value="4010" min="1" max="65535">
+                            </div>
+                        </div>
+                        
+                        <div class="validation-error" id="sender-error">Please select or enter a receiver address</div>
+                    </div>
+
+                    <!-- Receiver Configuration -->
+                    <div id="step-2-receiver" style="display:none;">
+                        <h3>Step 2: Configure Receiver</h3>
+                        <p>Set the UDP port for receiving audio data. This must match the sender's configuration.</p>
+                        
+                        <div class="wizard-form-group">
+                            <label for="receiver-port">UDP Port:</label>
+                            <input type="number" id="receiver-port" value="4010" min="1" max="65535">
+                            <p class="setting-description" style="font-size: 12px; color: #666; margin-top: 5px;">Default is 4010. Change only if you have a custom setup.</p>
+                        </div>
+
+                        <div class="validation-error" id="receiver-error">Please enter a valid port number (1-65535)</div>
+                    </div>
+                </div>
+
+                <!-- Step 3: AP Settings -->
+                <div class="wizard-step" id="step-3" style="display:none;">
+                    <h3>Step 3: Access Point Settings <span id="ap-optional-text">(Optional)</span></h3>
+                    <p id="ap-description">Configure the device's own WiFi hotspot for initial setup or fallback access:</p>
+                    
+                    <div id="ap-only-warning" style="display:none; background: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; border-radius: 4px; margin-bottom: 20px;">
+                        <strong>⚠️ Important for AP-Only Mode:</strong>
+                        <p style="margin-top: 10px;">Since this device will operate in AP-Only mode, the access point will always be active. Choose a unique name to avoid conflicts with other ESP32 devices.</p>
+                    </div>
+                    
+                    <div id="ap-info" style="background: #f8f9fa; border-left: 4px solid #6c757d; padding: 15px; border-radius: 4px; margin-bottom: 20px;">
+                        <strong>💡 Access Point Info:</strong>
+                        <p style="margin-top: 10px;">The access point provides a fallback way to connect to your device if the WiFi connection fails. You can skip this step if you don't need this feature.</p>
+                    </div>
+                    
+                    <div class="wizard-form-group">
+                        <label for="ap-ssid">Access Point Name:</label>
+                        <input type="text" id="ap-ssid" placeholder="ESP32-Scream">
+                    </div>
+                    
+                    <div class="wizard-form-group">
+                        <label for="ap-password">Access Point Password (leave empty for open):</label>
+                        <input type="password" id="ap-password" placeholder="Optional password">
+                    </div>
+                    
+                    <div class="wizard-form-group" id="ap-hide-option">
+                        <label>
+                            <input type="checkbox" id="ap-hide-connected">
+                            Hide access point when connected to WiFi
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Step 4: Network Configuration -->
+                <div class="wizard-step" id="step-4" style="display:none;">
+                    <h3>Step 4: Device & Network Configuration</h3>
+
+                    <div class="wizard-form-group">
+                        <label for="device-hostname">Device Name:</label>
+                        <input type="text" id="device-hostname" placeholder="ESP32-Scream-XXXXXX">
+                        <p class="setting-description" style="font-size: 12px; color: #666; margin-top: 5px;">This is how your device will appear on the network</p>
+                        <div class="validation-error" id="hostname-error">Please enter a device name</div>
+                    </div>
+
+                    <hr style="margin: 20px 0; border: none; border-top: 1px solid #e0e0e0;">
+
+                    <p>Choose how your device will connect to the network.</p>
+                    
+                    <div style="margin-bottom: 20px;">
+                        <label id="wifi-mode-label" style="display: block; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; cursor: pointer; margin-bottom: 10px;">
+                            <input type="radio" name="network-mode" value="wifi" onchange="toggleNetworkMode(false)">
+                            <strong>Connect to WiFi Network</strong>
+                            <div style="font-size: 14px; color: #666; margin-top: 5px;">Connect to your existing WiFi network for normal operation</div>
+                        </label>
+                        
+                        <label id="ap-mode-label" style="display: block; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; cursor: pointer;">
+                            <input type="radio" name="network-mode" value="ap-only" onchange="toggleNetworkMode(true)">
+                            <strong>AP-Only Mode</strong>
+                            <div style="font-size: 14px; color: #666; margin-top: 5px;">Device acts as its own access point for direct device-to-device connection</div>
+                        </label>
+                    </div>
+                    
+                    <div id="wifi-config-section">
+                        <div class="wizard-form-group">
+                            <label for="wifi-ssid">Network Name (SSID):</label>
+                            <input type="text" id="wifi-ssid" placeholder="Your WiFi network name">
+                        </div>
+                        
+                        <div class="wizard-form-group">
+                            <label for="wifi-password">Password:</label>
+                            <input type="password" id="wifi-password" placeholder="WiFi password">
+                        </div>
+                        
+                        <button class="secondary" onclick="scanNetworksInWizard()">📡 Scan for Networks</button>
+                        
+                        <div id="wizard-network-list" style="margin-top: 15px;"></div>
+                    </div>
+                    
+                    <div id="ap-only-notice" style="display:none;">
+                        <div style="background: #e3f2fd; border-left: 4px solid #2196f3; padding: 15px; border-radius: 4px;">
+                            <strong>ℹ️ AP-Only Mode</strong>
+                            <p style="margin-top: 10px;">In this mode:</p>
+                            <ul style="margin: 10px 0; padding-left: 20px;">
+                                <li>The device will create its own WiFi network</li>
+                                <li>Other devices can connect directly to it</li>
+                                <li>No internet connection is required</li>
+                                <li>Perfect for direct sender/receiver connections</li>
+                            </ul>
+                            <p id="ap-name-preview" style="margin-bottom: 0; font-size: 14px;"></p>
+                        </div>
+                    </div>
+                    
+                    <div class="validation-error" id="wifi-error">Please enter a network name (SSID) or select AP-Only mode</div>
+                </div>
+
+                <!-- Step 5: Review & Finish -->
+                <div class="wizard-step" id="step-5" style="display:none;">
+                    <h3>Step 5: Review & Finish</h3>
+                    <p>Please confirm your settings before applying them to the device.</p>
+                    
+                    <div style="background: #f8f9fa; padding: 15px; border-radius: 8px;">
+                        <h4 style="margin-top: 0;">Summary:</h4>
+                        <ul id="review-summary" style="list-style: none; padding: 0; line-height: 1.8;">
+                            <!-- Content populated by JS -->
+                        </ul>
+                    </div>
+                    
+                    <div style="margin-top: 20px; padding: 15px; background: #fff3cd; border-radius: 8px; border-left: 4px solid #ffc107;">
+                        <strong>⚠️ Important:</strong> After finishing, the device will restart to apply the new configuration.
+                        <span id="review-reconnect-warning"></span>
+                    </div>
+                </div>
+
+                <!-- Loading State -->
+                <div id="wizard-loading" style="display:none;">
+                    <div class="wizard-success">
+                        <div style="font-size: 40px; margin-bottom: 20px;">⏳</div>
+                        <h3>Applying Configuration...</h3>
+                        <p>Please wait while we configure your device...</p>
+                    </div>
+                </div>
+
+                <!-- Success State -->
+                <div id="wizard-success" style="display:none;">
+                    <div class="wizard-success">
+                        <div class="success-icon">✓</div>
+                        <h3>Setup Complete!</h3>
+                        <p>Your ESP32 Scream device has been configured successfully.</p>
+                        <p id="success-wifi-msg" style="display:none; margin-top: 20px;">
+                            <strong>Important:</strong> The device will now restart and connect to your WiFi network.
+                            You may need to find its new IP address on your network.
+                        </p>
+                    </div>
+                </div>
+
+                <!-- Connecting Message -->
+                <div id="wifi-connecting-msg" style="display:none; text-align: center; margin-top: 20px; padding: 15px; background: #e3f2fd; border-radius: 4px;">
+                    <p><strong>Connecting to WiFi network...</strong></p>
+                    <p style="font-size: 14px; color: #666; margin-top: 10px;">
+                        The device is now switching to your WiFi network.
+                    </p>
+                </div>
+
+                <!-- Redirect Message -->
+                <div id="redirect-msg" style="display:none; text-align: center; margin-top: 20px;">
+                    <p>Redirecting to device's new address...</p>
+                    <p style="font-size: 12px; color: #666;">
+                        If redirect fails, please find the device on your network.
+                    </p>
+                </div>
+
+                <!-- Error State -->
+                <div id="wizard-error" style="display:none;">
+                    <div class="wizard-success">
+                        <div style="font-size: 40px; color: #dc3545; margin-bottom: 20px;">✗</div>
+                        <h3>Configuration Failed</h3>
+                        <p id="error-message" style="color: #dc3545;"></p>
+                        <button class="primary" onclick="wizard.currentStep=4; updateWizardStep();">
+                            Try Again
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="wizard-footer">
+                <button id="wizard-back" class="secondary" onclick="wizardPrevious()" style="display:none;">Back</button>
+                <button id="wizard-skip" class="secondary" onclick="wizardSkip()" style="display:none;">Skip</button>
+                <button id="wizard-next" class="primary" onclick="wizardNext()">Next</button>
+            </div>
+            
+            <button class="wizard-close" onclick="closeWizard()" title="Exit wizard">×</button>
+        </div>
+    </div>
+    
+    <!-- Pull-to-refresh indicator (for mobile) -->
+    <div id="pullToRefresh" class="pull-to-refresh" style="display: none;">
+        <span class="pull-text">Pull to refresh</span>
+    </div>
+    
+    <script src="wizard.js"></script>
+</body>
+</html>

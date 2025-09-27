@@ -1,0 +1,90 @@
+dependencies:
+  cherry-embedded/cherryusb:
+    component_hash: ec3fda70779076a4a996abc52684fcafe4c61b269b722b775562f96c042c08f6
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=4.4.1'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    targets:
+    - esp32s2
+    - esp32s3
+    - esp32p4
+    version: 1.5.2~2
+  espressif/cmake_utilities:
+    component_hash: 05165f30922b422b4b90c08845e6d449329b97370fbd06309803d8cb539d79e3
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=4.1'
+    source:
+      registry_url: https://components.espressif.com
+      type: service
+    version: 1.1.1
+  espressif/mdns:
+    component_hash: 3ec0af5f6bce310512e90f482388d21cc7c0e99668172d2f895356165fc6f7c5
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.8.2
+  espressif/usb_device_uac:
+    component_hash: d84300e48d85793db0e300083cebab5084e69e4a63231857fb8b97517dbc3007
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=4.4'
+    - name: espressif/cmake_utilities
+      registry_url: https://components.espressif.com
+      require: private
+      version: '*'
+    - name: leeebo/tinyusb_src
+      registry_url: https://components.espressif.com
+      require: private
+      version: '>=0.16.0~5'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    targets:
+    - esp32s2
+    - esp32s3
+    - esp32p4
+    version: 0.2.0
+  espressif/usb_host_uac:
+    dependencies: []
+    source:
+      path: C:\Users\Nathan\Documents\GitHub\esp32-scream-receiver\components\espressif__usb_host_uac
+      type: local
+    version: 1.0.0
+  idf:
+    source:
+      type: idf
+    version: 5.5.1
+  leeebo/tinyusb_src:
+    component_hash: f8a386b696474c2b20482b662319200e4a2ce9cae8fa3ae7830d3929f03780c8
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=4.4'
+    source:
+      registry_url: https://components.espressif.com
+      type: service
+    targets:
+    - esp32s2
+    - esp32s3
+    - esp32p4
+    version: 0.16.0~6
+direct_dependencies:
+- cherry-embedded/cherryusb
+- espressif/mdns
+- espressif/usb_device_uac
+- espressif/usb_host_uac
+- idf
+manifest_hash: a22b627900577256db59df4d902bb980f60ea76806b002ac6170de8cea1e441e
+target: esp32s3
+version: 2.0.0

@@ -1,0 +1,98 @@
+menu "Web Server Configuration"
+
+    config HTTPD_MAX_REQ_HDR_LEN
+        int "Max HTTP Request Header Length"
+        default 2048
+        help
+            This sets the maximum size of HTTP request headers in bytes.
+            Increase this value if you need to handle large headers.
+
+    config HTTPD_MAX_URI_LEN
+        int "Max HTTP URI Length"
+        default 1024
+        help
+            This sets the maximum size of HTTP URIs in bytes.
+            Increase this value if you need to handle long URIs.
+
+endmenu
+
+menu "USB-C Power Management Configuration"
+
+    config I2C_MASTER_SCL_IO
+        int "I2C Master SCL GPIO"
+        default 22
+        help
+            GPIO number for I2C master SCL.
+
+    config I2C_MASTER_SDA_IO
+        int "I2C Master SDA GPIO"
+        default 8
+        help
+            GPIO number for I2C master SDA.
+            
+    config OTG_PIN
+        int "OTG Control GPIO"
+        default 13
+        help
+            GPIO number for OTG control pin. This pin must be high to activate boost mode.
+
+    config I2C_MASTER_FREQ_HZ
+        int "I2C Master Frequency (Hz)"
+        default 100000
+        help
+            I2C master clock frequency in Hz.
+
+    config POWER_CHIP_ADDR
+        hex "USB-C Power Chip I2C Address"
+        default 0x6B
+        help
+            I2C address of the USB-C power management chip.
+
+    config ENABLE_OTG_BOOST_MODE
+        bool "Enable OTG (Boost) Mode"
+        default y
+        help
+            Enable 5V output on PMID for USB-C port.
+
+    config BOOST_VOLTAGE_VALUE
+        hex "Boost Voltage Register Value"
+        default 0x93
+        help
+            Value for the boost voltage register (REG0A).
+            Default 0x93 sets BOOSTV[3:0] = 1001 for 5.126V output.
+
+    config BOOST_FREQUENCY_VALUE
+        hex "Boost Frequency Register Value"
+        default 0x38
+        help
+            Value for the boost frequency register (REG02).
+            Default 0x38 sets BOOST_FREQ bit (5) for 500kHz frequency.
+
+menu "SPDIF Decoder Configuration"
+
+    config SPDIF_USE_DME_DECODER
+        bool "Use Differential Manchester Decoder"
+        default y
+        help
+            Enable the new Differential Manchester decoder.
+
+    config SPDIF_DEBUG_DURATIONS
+        bool "Enable Duration Debugging"
+        default n
+        help
+            Enable logging of duration statistics.
+
+    config SPDIF_DME_SELFTEST
+        bool "Enable DME Self Test"
+        default n
+        help
+            Enable synthetic pulse injection for DME self-test.
+
+    config SPDIF_DME_DUMP_BYTES
+        bool "Enable DME Byte Dump"
+        default n
+        help
+            Enable dumping of decoder output bytes.
+
+endmenu
+endmenu

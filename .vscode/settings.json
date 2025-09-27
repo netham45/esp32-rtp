@@ -1,0 +1,25 @@
+{
+    "idf.pythonInstallPath": "C:\\Espressif\\tools\\idf-python\\3.11.2\\python.exe",
+    "files.associations": {
+        "git_diff": "cpp",
+        "global.h": "c",
+        "config.h": "c",
+        "scream_sender.h": "c",
+        "inttypes.h": "c",
+        "web_server.h": "c",
+        "bq25895_web.h": "c",
+        "string": "c",
+        "bmc_edge_decoder.h": "c",
+        "xmemory": "c",
+        "channel_status.h": "c",
+        "histogram.h": "c",
+        "log_buffer.h": "c",
+        "algorithm": "c",
+        "usb_out.h": "c",
+        "task.h": "c",
+        "ntp_client.h": "c"
+    },
+    "chat.agent.enabled": false,
+    "chat.commandCenter.enabled": false,
+    "chat.notifyWindowOnConfirmation": false
+}

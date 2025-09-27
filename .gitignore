@@ -1,0 +1,7 @@
+**/secrets.h
+build/
+spiffs/
+managed_components/
+*.uf2
+.vscode/BROWSE.VC.DB**
+sdkconfig.old

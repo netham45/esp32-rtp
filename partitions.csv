@@ -1,0 +1,7 @@
+# ESP32 Partition Table for OTA with 4MB flash
+# Name,   Type, SubType, Offset,  Size, Flags
+otadata,  data, ota,     0x9000,  8k,
+phy_init, data, phy,     0xf000,  4k,
+ota_0,    app,  ota_0,   0x10000, 1856k,
+ota_1,    app,  ota_1,   ,        1856k,
+nvs,      data, nvs,     ,        320k,

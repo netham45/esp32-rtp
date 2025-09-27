@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>ESP32 RTP Transceiver</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <button class="mobile-menu-toggle" id="mobileMenuToggle" aria-label="Toggle menu">
+        <span></span>
+        <span></span>
+        <span></span>
+    </button>
+    
+    <div class="container" id="mainContainer">
+        <h1>ESP32 RTP Transciever</h1>
+        
+        <div class="tabs" id="tabsNav">
+            <div class="tab" id="wizard-tab">Configuration</div>
+            <div class="tab" onclick="openTab(event, 'logs-tab')">Logs</div>
+            <div class="tab" onclick="openTab(event, 'ota-tab')">System Update</div>
+            <div class="tab active" onclick="openTab(event, 'advanced-tab')">Import/Export</div>
+        </div>
+        
+        <div id="advanced-tab" class="tab-content active">
+            <form id="advanced-settings-form" onsubmit="saveSettings(event)">
+                <div class="settings-group">
+                    <h2>Configuration Management</h2>
+                    <div class="config-buttons">
+                        <button type="button" id="export-settings" class="export-btn">
+                            <span>📥</span> Export Settings
+                        </button>
+                        <button type="button" id="import-settings" class="import-btn">
+                            <span>📤</span> Import Settings
+                        </button>
+                        <input type="file" id="import-file" accept=".json" style="display: none;">
+                    </div>
+                </div>
+            </form>
+            
+            <div id="settings-alert" class="alert hidden"></div>
+            <div id="settings-success" class="success hidden"></div>
+        </div>
+        
+        <div id="logs-tab" class="tab-content">
+            <div class="logs-container">
+                <div class="logs-header">
+                    <h2>System Logs</h2>
+                    <p class="logs-description">View real-time logs from your ESP32 device for debugging and monitoring.</p>
+                </div>
+                
+                <div class="logs-controls">
+                    <div class="logs-controls-row">
+                        <div class="logs-control-group">
+                            <label for="log-line-count">Lines to display:</label>
+                            <select id="log-line-count" onchange="updateLogLineCount()">
+                                <option value="25">25 lines</option>
+                                <option value="50" selected>50 lines</option>
+                                <option value="100">100 lines</option>
+                                <option value="200">200 lines</option>
+                            </select>
+                        </div>
+                        
+                        <div class="logs-control-group">
+                            <label for="log-auto-refresh">
+                                <input type="checkbox" id="log-auto-refresh" checked onchange="toggleAutoRefresh()">
+                                Auto-refresh
+                            </label>
+                            <select id="log-refresh-interval" onchange="updateRefreshInterval()">
+                                <option value="2000">2 seconds</option>
+                                <option value="3000" selected>3 seconds</option>
+                                <option value="5000">5 seconds</option>
+                            </select>
+                        </div>
+                        
+                        <div class="logs-control-group">
+                            <label for="log-auto-scroll">
+                                <input type="checkbox" id="log-auto-scroll" checked onchange="toggleAutoScroll()">
+                                Auto-scroll
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <div class="logs-button-group">
+                        <button type="button" class="primary" onclick="refreshLogs()">
+                            <span class="btn-icon">↻</span> Refresh Now
+                        </button>
+                        <button type="button" class="secondary" onclick="clearLogs()">
+                            <span class="btn-icon">🗑️</span> Clear Logs
+                        </button>
+                        <button type="button" class="secondary" onclick="downloadLogs()">
+                            <span class="btn-icon">📥</span> Download
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="logs-display-container">
+                    <div class="logs-status" id="logs-status">
+                        <span class="status-indicator"></span>
+                        <span class="status-text">Ready</span>
+                        <span class="logs-timestamp" id="logs-last-updated"></span>
+                    </div>
+                    
+                    <div class="logs-display" id="logs-display">
+                        <pre id="logs-content">No logs available. Click "Refresh Now" to load logs.</pre>
+                    </div>
+                </div>
+                
+                <div id="logs-alert" class="alert hidden"></div>
+                <div id="logs-success" class="success hidden"></div>
+            </div>
+        </div>
+        
+        <div id="ota-tab" class="tab-content">
+            <div class="ota-container">
+                <div class="ota-header">
+                    <h2>System Update</h2>
+                    <p class="ota-description">
+                        Update your ESP32 Scream device firmware over-the-air.
+                        Ensure stable power and network connection during update.
+                    </p>
+                </div>
+                
+                <div class="ota-current-version">
+                    <h3>Current Firmware</h3>
+                    <div class="version-info-card">
+                        <div class="version-row">
+                            <span class="version-label">Version:</span>
+                            <span class="version-value" id="current-version">{{FIRMWARE_VERSION}}</span>
+                        </div>
+                        <div class="version-row">
+                            <span class="version-label">Build Date:</span>
+                            <span class="version-value" id="build-date">{{BUILD_DATE}}</span>
+                        </div>
+                        <div class="version-row">
+                            <span class="version-label">Platform:</span>
+                            <span class="version-value" id="platform">{{PLATFORM}}</span>
+                        </div>
+                        <div class="version-row">
+                            <span class="version-label">Free Space:</span>
+                            <span class="version-value" id="free-space">Checking...</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="ota-upload-section">
+                    <h3>Firmware Update</h3>
+                    
+                    <div class="ota-safety-notice">
+                        <div class="notice-icon">⚠️</div>
+                        <div class="notice-content">
+                            <h4>Important Safety Information</h4>
+                            <ul>
+                                <li>Do not disconnect power during update</li>
+                                <li>Ensure stable WiFi connection</li>
+                                <li>Update process may take 2-3 minutes</li>
+                                <li>Device will restart automatically after update</li>
+                            </ul>
+                        </div>
+                    </div>
+                    
+                    <div class="ota-upload-area" id="ota-upload-area">
+                        <input type="file" id="ota-file-input" accept=".bin" style="display: none;">
+                        
+                        <div class="upload-dropzone" id="upload-dropzone">
+                            <div class="dropzone-icon">📁</div>
+                            <div class="dropzone-text">
+                                <p><strong>Drag & drop firmware file here</strong></p>
+                                <p>or <button type="button" class="link-button" onclick="document.getElementById('ota-file-input').click()">browse files</button></p>
+                                <p class="file-hint">Accepted format: .bin files only</p>
+                            </div>
+                        </div>
+                        
+                        <div class="file-selected" id="file-selected" style="display: none;">
+                            <div class="file-info">
+                                <div class="file-icon">📄</div>
+                                <div class="file-details">
+                                    <div class="file-name" id="file-name">firmware.bin</div>
+                                    <div class="file-size" id="file-size">2.3 MB</div>
+                                </div>
+                                <button type="button" class="remove-file-btn" onclick="removeOTAFile()">✕</button>
+                            </div>
+                            
+                            <div class="file-validation" id="file-validation">
+                                <div class="validation-item" id="size-check">
+                                    <span class="check-icon">⏳</span>
+                                    <span class="check-text">Checking file size...</span>
+                                </div>
+                                <div class="validation-item" id="type-check">
+                                    <span class="check-icon">⏳</span>
+                                    <span class="check-text">Validating file type...</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="ota-progress-section" id="ota-progress-section" style="display: none;">
+                        <div class="progress-header">
+                            <h4>Update Progress</h4>
+                            <span class="progress-percentage" id="progress-percentage">0%</span>
+                        </div>
+                        
+                        <div class="progress-bar-container">
+                            <div class="progress-bar-fill" id="progress-bar-fill" style="width: 0%"></div>
+                        </div>
+                        
+                        <div class="progress-status" id="progress-status">
+                            <span class="status-icon spinning">⏳</span>
+                            <span class="status-text">Preparing update...</span>
+                        </div>
+                        
+                        <div class="progress-details" id="progress-details">
+                            <div class="detail-item">
+                                <span class="detail-label">Transferred:</span>
+                                <span class="detail-value" id="bytes-transferred">0 KB / 0 KB</span>
+                            </div>
+                            <div class="detail-item">
+                                <span class="detail-label">Speed:</span>
+                                <span class="detail-value" id="upload-speed">0 KB/s</span>
+                            </div>
+                            <div class="detail-item">
+                                <span class="detail-label">Time Remaining:</span>
+                                <span class="detail-value" id="time-remaining">Calculating...</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="ota-controls">
+                        <button type="button" id="ota-upload-btn" class="primary" onclick="startOTAUpdate()" disabled>
+                            Start Update
+                        </button>
+                        <button type="button" id="ota-cancel-btn" class="secondary" onclick="cancelOTAUpdate()" style="display: none;">
+                            Cancel Update
+                        </button>
+                    </div>
+                    
+                    <div class="ota-result" id="ota-result" style="display: none;">
+                        <div class="result-success" id="result-success" style="display: none;">
+                            <div class="result-icon">✅</div>
+                            <h4>Update Successful!</h4>
+                            <p>Your device has been updated successfully and will restart automatically.</p>
+                            <p class="reconnect-info">The page will refresh in <span id="reconnect-countdown">30</span> seconds...</p>
+                            <button type="button" class="secondary" onclick="location.reload()">Refresh Now</button>
+                        </div>
+                        
+                        <div class="result-error" id="result-error" style="display: none;">
+                            <div class="result-icon error">❌</div>
+                            <h4>Update Failed</h4>
+                            <p id="error-message">An error occurred during the update process.</p>
+                            <button type="button" class="primary" onclick="resetOTAInterface()">Try Again</button>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="ota-advanced-section">
+                    <details>
+                        <summary>Advanced Options</summary>
+                        <div class="advanced-content">
+                            <div class="form-row checkbox-row">
+                                <label for="ota-skip-validation">
+                                    <input type="checkbox" id="ota-skip-validation">
+                                    Skip firmware validation (use with caution)
+                                </label>
+                            </div>
+                            <div class="form-row checkbox-row">
+                                <label for="ota-force-update">
+                                    <input type="checkbox" id="ota-force-update">
+                                    Force update even if version is older
+                                </label>
+                            </div>
+                            <div class="form-row">
+                                <button type="button" class="secondary" onclick="checkForUpdates()">
+                                    Check for Updates Online
+                                </button>
+                            </div>
+                        </div>
+                    </details>
+                </div>
+            </div>
+            
+            <div id="ota-alert" class="alert hidden"></div>
+            <div id="ota-success" class="success hidden"></div>
+        </div>
+    </div>
+    
+    <button class="fab" id="floatingActionButton" aria-label="Quick action">
+        <span class="fab-icon">⚡</span>
+    </button>
+    
+    <div class="help-tooltip" id="help-tooltip"></div>
+    
+    <div class="keyboard-shortcuts-dialog" id="keyboard-shortcuts-dialog">
+        <div class="dialog-content">
+            <h3>Keyboard Shortcuts</h3>
+            <div class="shortcuts-list">
+                <div class="shortcut-item">
+                    <kbd>Ctrl+S</kbd> <span>Save settings</span>
+                </div>
+                <div class="shortcut-item">
+                    <kbd>Ctrl+F</kbd> <span>Focus search</span>
+                </div>
+                <div class="shortcut-item">
+                    <kbd>Ctrl+E</kbd> <span>Export settings</span>
+                </div>
+                <div class="shortcut-item">
+                    <kbd>Esc</kbd> <span>Close dialogs/Clear search</span>
+                </div>
+                <div class="shortcut-item">
+                    <kbd>?</kbd> <span>Show this help</span>
+                </div>
+            </div>
+            <button type="button" class="close-dialog">Close</button>
+        </div>
+    </div>
+    
+    <!-- Dynamically Created Elements (moved from script.js) -->
+    
+    <!-- Mobile Menu Overlay -->
+    <div id="mobile-menu-overlay" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1001; display: none;"></div>
+    
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="loading-overlay">
+        <div class="loading-content">
+            <div class="loading-spinner">
+                <div class="spinner"></div>
+                <div class="loading-text">Loading...</div>
+                <div class="loading-subtext"></div>
+                <div class="loading-progress" style="display: none;">
+                    <div class="loading-progress-bar"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Toast Container -->
+    <div id="toast-container" class="toast-container"></div>
+    
+    <!-- Undo Button -->
+    <button id="undo-changes" class="secondary undo-button" style="display: none;">Undo All Changes</button>
+    
+    <!-- Setup Wizard Overlay -->
+    <div id="setup-wizard-overlay" class="wizard-overlay" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: transparent; display: none; align-items: center; justify-content: center; z-index: 10000; animation: fadeIn 0.3s;">
+        <iframe id="wizard-iframe" style="width: 90%; max-width: 600px; height: 80vh; max-height: 80vh; border: none; border-radius: 12px; background: transparent; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3); animation: slideUp 0.3s;"></iframe>
+    </div>
+    
+    <!-- Wizard Animations CSS -->
+    <style id="wizard-animations">
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        @keyframes slideUp {
+            from { transform: translateY(20px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        .wizard-overlay.active {
+            display: flex !important;
+        }
+    </style>
+    
+    <script src="script.js"></script>
+</body>
+</html>

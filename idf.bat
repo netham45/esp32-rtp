@@ -1,0 +1,4 @@
+@echo off
+PATH=c:\Program Files\Python313\;C:\Program Files\Python313\Scripts\;C:\Program Files\Python313\;C:\WINDOWS\system32;C:\WINDOWS;C:\WINDOWS\System32\Wbem;C:\WINDOWS\System32\WindowsPowerShell\v1.0\;C:\WINDOWS\System32\OpenSSH\;C:\Program Files\Microsoft VS Code\bin;C:\Program Files\dotnet\;C:\ProgramData\chocolatey\bin;C:\Program Files\Git\cmd;C:\Program Files\Docker\Docker\resources\bin;C:\Program Files (x86)\Windows Kits\10\Windows Performance Toolkit\;C:\Program Files (x86)\dotnet\;C:\Program Files\NVIDIA Corporation\NVIDIA app\NvDLISR;C:\Program Files\PowerShell\7\;C:\Users\Nathan\AppData\Local\Microsoft\WindowsApps;C:\Users\Nathan\AppData\Local\GitHubDesktop\bin;C:\Users\Nathan\.dotnet\tools;C:\Users\Nathan\AppData\Local\Programs\Microsoft VS Code Insiders\bin
+call C:\esp-idf\esp-idf-v5.5.1\export.bat
+idf.py %1 %2 %3 %4 %5 %6 %7 %8 %9

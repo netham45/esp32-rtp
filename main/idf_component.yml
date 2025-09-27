@@ -1,0 +1,12 @@
+dependencies:
+  cherry-embedded/cherryusb: "*"
+  espressif/mdns: "*"
+  idf: ">=5.0"
+  espressif/usb_host_uac:
+    version: "1.0.*"
+    rules:
+      - if: "target in [esp32s2, esp32s3, esp32p4]"
+  espressif/usb_device_uac:
+    version: 0.*
+    rules:
+      - if: "target in [esp32s2, esp32s3, esp32p4]"
