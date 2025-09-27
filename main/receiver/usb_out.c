@@ -13,6 +13,7 @@
 #include "receiver/audio_out.h"
 #include "config.h"
 #include "lifecycle_manager.h"
+#include <string.h>
 
 #define TAG "usb_out"
 
