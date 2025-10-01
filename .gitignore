@@ -3,5 +3,5 @@ build/
 spiffs/
 managed_components/
 *.uf2
-.vscode/BROWSE.VC.DB**
+.vscode/BROWSE**
 sdkconfig.old
