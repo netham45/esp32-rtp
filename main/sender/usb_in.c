@@ -41,6 +41,7 @@ static esp_err_t usb_audio_output_callback(uint8_t *buf, size_t len, void *ctx)
         return ESP_OK;
     }
     
+    
     // Write the received audio data to PCM ring buffer
     BaseType_t result = xRingbufferSend(pcm_buffer, buf, len, 0);
     
@@ -119,17 +120,6 @@ esp_err_t usb_in_init(void (*init_done_cb)(void))
     // Store init callback
     g_usb_state.init_done_cb = init_done_cb;
     
-    // Create PCM ring buffer if not exists
-    if (!pcm_buffer) {
-        pcm_buffer = xRingbufferCreate(PCM_BUFFER_SIZE, RINGBUF_TYPE_BYTEBUF);
-        if (!pcm_buffer) {
-            ESP_LOGE(TAG, "Failed to create PCM ring buffer");
-            return ESP_ERR_NO_MEM;
-        }
-        ESP_LOGI(TAG, "Created PCM ring buffer size=%d", PCM_BUFFER_SIZE);
-    }
-    
-    
     // Initialize UAC device - it will handle USB PHY and TinyUSB internally
     uac_device_config_t uac_config = {
         .skip_tinyusb_init = false,  // Let UAC component handle USB PHY and TinyUSB init
@@ -165,11 +155,6 @@ esp_err_t usb_in_init(void (*init_done_cb)(void))
     return ESP_OK;
     
 cleanup:
-    // Clean up on error
-    if (pcm_buffer) {
-        vRingbufferDelete(pcm_buffer);
-        pcm_buffer = NULL;
-    }
     
     ESP_LOGE(TAG, "USB input initialization failed: %s", esp_err_to_name(ret));
     return ret;

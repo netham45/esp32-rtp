@@ -63,6 +63,10 @@ static int s_ref_count = 0;
 static bool s_advertisement_enabled = false;
 static bool s_mdns_initialized = false;
 
+// Static buffers for TXT record strings that need to persist
+static char s_battery_level_str[8];
+static char s_mac_str[18];  // xx:xx:xx:xx:xx:xx + null terminator
+
 // Helper function to remove stale devices (older than 2 minutes)
 static void remove_stale_devices(void) {
     time_t current_time = time(NULL);
@@ -368,22 +372,20 @@ static void mdns_discovery_task(void *pvParameters) {
                 type = "receiver";
             }
 
-            // Get current battery level
-            char battery_level_str[8];
-            get_battery_level_string(battery_level_str, sizeof(battery_level_str));
+            // Get current battery level (use static buffer)
+            get_battery_level_string(s_battery_level_str, sizeof(s_battery_level_str));
 
-            // Get MAC address for TXT record
+            // Get MAC address for TXT record (use static buffer)
             uint8_t mac[6];
-            char mac_str[18]; // xx:xx:xx:xx:xx:xx + null terminator
             esp_err_t mac_err = esp_wifi_get_mac(WIFI_IF_STA, mac);
             if (mac_err != ESP_OK) {
                 mac_err = esp_read_mac(mac, ESP_MAC_WIFI_STA);
             }
             if (mac_err == ESP_OK) {
-                snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
+                snprintf(s_mac_str, sizeof(s_mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
                          mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
             } else {
-                strncpy(mac_str, "unknown", sizeof(mac_str));
+                strncpy(s_mac_str, "unknown", sizeof(s_mac_str));
             }
 
             // Hard-coded values that don't change
@@ -395,8 +397,8 @@ static void mdns_discovery_task(void *pvParameters) {
             mdns_txt_item_t txt_records[] = {
                 {"mode", mode},
                 {"type", type},
-                {"battery", battery_level_str},
-                {"mac", mac_str},
+                {"battery", s_battery_level_str},
+                {"mac", s_mac_str},
                 {"samplerates", samplerates},
                 {"codecs", codecs},
                 {"channels", channels}
@@ -408,7 +410,7 @@ static void mdns_discovery_task(void *pvParameters) {
             
             if (err == ESP_OK) {
                 ESP_LOGD(TAG, "✓ TXT records updated successfully");
-                ESP_LOGD(TAG, "  battery=%s%% (updated)", battery_level_str);
+                ESP_LOGD(TAG, "  battery=%s%% (updated)", s_battery_level_str);
                 ESP_LOGD(TAG, "  mode=%s, type=%s", mode, type);
             } else {
                 ESP_LOGW(TAG, "Failed to update TXT records: %s", esp_err_to_name(err));
@@ -614,22 +616,20 @@ esp_err_t mdns_discovery_start(void) {
                 type = "receiver";
             }
             
-            // Get battery level from BQ25895 if available
-            char battery_level_str[8];
-            get_battery_level_string(battery_level_str, sizeof(battery_level_str));
+            // Get battery level from BQ25895 if available (use static buffer)
+            get_battery_level_string(s_battery_level_str, sizeof(s_battery_level_str));
 
-            // Get MAC address for TXT record
+            // Get MAC address for TXT record (use static buffer)
             uint8_t mac[6];
-            char mac_str[18]; // xx:xx:xx:xx:xx:xx + null terminator
             esp_err_t mac_err = esp_wifi_get_mac(WIFI_IF_STA, mac);
             if (mac_err != ESP_OK) {
                 mac_err = esp_read_mac(mac, ESP_MAC_WIFI_STA);
             }
             if (mac_err == ESP_OK) {
-                snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
+                snprintf(s_mac_str, sizeof(s_mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
                          mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
             } else {
-                strncpy(mac_str, "unknown", sizeof(mac_str));
+                strncpy(s_mac_str, "unknown", sizeof(s_mac_str));
             }
 
             // Hard-coded supported sample rates, codecs, and channels
@@ -640,8 +640,8 @@ esp_err_t mdns_discovery_start(void) {
             mdns_txt_item_t txt_records[] = {
                 {"mode", mode},
                 {"type", type},
-                {"battery", battery_level_str},
-                {"mac", mac_str},
+                {"battery", s_battery_level_str},
+                {"mac", s_mac_str},
                 {"samplerates", samplerates},
                 {"codecs", codecs},
                 {"channels", channels}
@@ -650,8 +650,8 @@ esp_err_t mdns_discovery_start(void) {
             ESP_LOGD(TAG, "TXT Records:");
             ESP_LOGD(TAG, "  mode=%s", mode);
             ESP_LOGD(TAG, "  type=%s", type);
-            ESP_LOGD(TAG, "  battery=%s", battery_level_str);
-            ESP_LOGD(TAG, "  mac=%s", mac_str);
+            ESP_LOGD(TAG, "  battery=%s", s_battery_level_str);
+            ESP_LOGD(TAG, "  mac=%s", s_mac_str);
             ESP_LOGD(TAG, "  samplerates=%s", samplerates);
             ESP_LOGD(TAG, "  codecs=%s", codecs);
             ESP_LOGD(TAG, "  channels=%s", channels);
@@ -708,14 +708,14 @@ esp_err_t mdns_discovery_start(void) {
         // Create the discovery task
         ESP_LOGD(TAG, "Creating mDNS discovery task...");
         ESP_LOGD(TAG, "  Task name: mdns_discovery");
-        ESP_LOGD(TAG, "  Stack size: 4096");
+        ESP_LOGD(TAG, "  Stack size: 8192");
         ESP_LOGD(TAG, "  Priority: 5");
-        
+
         BaseType_t ret = xTaskCreatePinnedToCore(mdns_discovery_task,
                                       "mdns_discovery",
-                                      4096,
+                                      8192,
                                       NULL,
-                                      1,
+                                      5,
                                       &s_discovery_task, 0);
         
         ESP_LOGD(TAG, "xTaskCreate() returned: %s", ret == pdPASS ? "pdPASS" : "pdFAIL");
@@ -928,22 +928,20 @@ void mdns_discovery_enable_advertisement(bool enable) {
             type = "receiver";
         }
         
-        // Get battery level from BQ25895 if available
-        char battery_level_str[8];
-        get_battery_level_string(battery_level_str, sizeof(battery_level_str));
+        // Get battery level from BQ25895 if available (use static buffer)
+        get_battery_level_string(s_battery_level_str, sizeof(s_battery_level_str));
 
-        // Get MAC address for TXT record
+        // Get MAC address for TXT record (use static buffer)
         uint8_t mac[6];
-        char mac_str[18]; // xx:xx:xx:xx:xx:xx + null terminator
         esp_err_t mac_err = esp_wifi_get_mac(WIFI_IF_STA, mac);
         if (mac_err != ESP_OK) {
             mac_err = esp_read_mac(mac, ESP_MAC_WIFI_STA);
         }
         if (mac_err == ESP_OK) {
-            snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
+            snprintf(s_mac_str, sizeof(s_mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
                      mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
         } else {
-            strncpy(mac_str, "unknown", sizeof(mac_str));
+            strncpy(s_mac_str, "unknown", sizeof(s_mac_str));
         }
 
         // Hard-coded supported sample rates, codecs, and channels
@@ -954,18 +952,18 @@ void mdns_discovery_enable_advertisement(bool enable) {
         mdns_txt_item_t txt_records[] = {
             {"mode", mode},
             {"type", type},
-            {"battery", battery_level_str},
-            {"mac", mac_str},
+            {"battery", s_battery_level_str},
+            {"mac", s_mac_str},
             {"samplerates", samplerates},
             {"codecs", codecs},
             {"channels", channels}
         };
-        
+
         ESP_LOGD(TAG, "TXT Records:");
         ESP_LOGD(TAG, "  mode=%s", mode);
         ESP_LOGD(TAG, "  type=%s", type);
-        ESP_LOGD(TAG, "  battery=%s", battery_level_str);
-        ESP_LOGD(TAG, "  mac=%s", mac_str);
+        ESP_LOGD(TAG, "  battery=%s", s_battery_level_str);
+        ESP_LOGD(TAG, "  mac=%s", s_mac_str);
         ESP_LOGD(TAG, "  samplerates=%s", samplerates);
         ESP_LOGD(TAG, "  codecs=%s", codecs);
         ESP_LOGD(TAG, "  channels=%s", channels);

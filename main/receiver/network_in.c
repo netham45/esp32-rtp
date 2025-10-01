@@ -21,6 +21,7 @@
 #include "esp_log.h"
 #include "buffer.h"
 #include "config/config_manager.h"
+#include "visualizer/pcm_visualizer.h"  // For pcm_viz_write
 
 // RTP header structure (12 bytes) - matches sender format
 typedef struct __attribute__((packed)) {
@@ -43,160 +44,87 @@ typedef struct __attribute__((packed)) {
 #define UDP_PORT 4010
 #define MAX_RTP_PACKET_SIZE (sizeof(rtp_header_t) + (15 * 4) + 1152 + 512)  // Max: 12 + 60 (CSRCs) + 1152 (audio) + 512 (padding/extensions)
 #define PCM_CHUNK_SIZE 1152  // 288 samples * 2 channels * 2 bytes (typical expected size)
-#define SAP_PORT 9875
-#define SAP_MULTICAST_ADDR "239.255.255.255"
-#define SAP_BUFFER_SIZE 1024
+// SAP functionality moved to sap_listener.c
 
 // Socket and task handles
-static int sock = -1;
-static int sap_sock = -1;
+static int unicast_sock = -1;  // Socket for configured port (always active)
+static int multicast_sock = -1;  // Socket for multicast groups (when in multicast mode)
 static TaskHandle_t udp_handler_task = NULL;
-static TaskHandle_t sap_handler_task = NULL;
 
 // RTP statistics
 static uint32_t packets_received = 0;
 static uint32_t packets_lost = 0;
 
+// Multicast configuration
+typedef struct {
+    bool enabled;
+    char multicast_ip[16];
+    uint16_t port;
+    uint32_t ssrc_filter;
+    bool filter_by_ssrc;
+    struct ip_mreq mreq;
+} multicast_config_t;
+
+static multicast_config_t multicast_config = {
+    .enabled = false,
+    .multicast_ip = "",
+    .port = 0,
+    .ssrc_filter = 0,
+    .filter_by_ssrc = false
+};
+
 static void create_udp_server(void) {
     app_config_t* config = config_manager_get_config();
     uint16_t port = config ? config->port : UDP_PORT;
-    
+
     struct sockaddr_in dest_addr;
-    
-    sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
-    if (sock < 0) {
-        ESP_LOGE(TAG, "Unable to create socket: errno %d", errno);
+
+    unicast_sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
+    if (unicast_sock < 0) {
+        ESP_LOGE(TAG, "Unable to create unicast socket: errno %d", errno);
         return;
     }
-    
+
     // Set socket options
     int reuse = 1;
-    setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
-    
+    setsockopt(unicast_sock, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+
     // Set non-blocking
-    int flags = fcntl(sock, F_GETFL, 0);
-    fcntl(sock, F_SETFL, flags | O_NONBLOCK);
-    
+    int flags = fcntl(unicast_sock, F_GETFL, 0);
+    fcntl(unicast_sock, F_SETFL, flags | O_NONBLOCK);
+
     // Bind to UDP port
     memset(&dest_addr, 0, sizeof(dest_addr));
     dest_addr.sin_family = AF_INET;
     dest_addr.sin_addr.s_addr = htonl(INADDR_ANY);
     dest_addr.sin_port = htons(port);
-    
-    int err = bind(sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+
+    int err = bind(unicast_sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
     if (err < 0) {
-        ESP_LOGE(TAG, "Socket unable to bind: errno %d", errno);
-        close(sock);
-        sock = -1;
+        ESP_LOGE(TAG, "Unicast socket unable to bind: errno %d", errno);
+        close(unicast_sock);
+        unicast_sock = -1;
         return;
     }
-    
-    ESP_LOGI(TAG, "UDP server listening on port %d", port);
+
+    ESP_LOGI(TAG, "UDP server listening on port %d (unicast socket)", port);
 }
 
 static void close_udp_server(void) {
-    if (sock >= 0) {
-        close(sock);
-        sock = -1;
+    if (unicast_sock >= 0) {
+        close(unicast_sock);
+        unicast_sock = -1;
     }
 }
 
-// Basic SDP parser to find sample rate and connection address
-static bool parse_sdp_and_get_rate(const char *sdp, uint32_t *rate, char *ip_addr, size_t ip_addr_size) {
-    // Find audio media description
-    const char *a_line = strstr(sdp, "m=audio");
-    if (!a_line) return false;
-
-    // Find rtpmap attribute for L16/stereo - sender uses payload type 127
-    const char *rtpmap_line = strstr(a_line, "a=rtpmap:127 L16/48000/");
-    if (rtpmap_line) {
-        // The sender always uses 48kHz
-        *rate = 48000;
-    } else {
-        // Fallback to older format for compatibility
-        rtpmap_line = strstr(a_line, "a=rtpmap:11 L16/");
-        if (rtpmap_line) {
-            if (strstr(rtpmap_line, "44100")) *rate = 44100;
-            else if (strstr(rtpmap_line, "48000")) *rate = 48000;
-            else if (strstr(rtpmap_line, "96000")) *rate = 96000;
-            else if (strstr(rtpmap_line, "192000")) *rate = 192000;
-            else return false; // Unsupported rate
-        } else {
-            return false;
-        }
+static void close_multicast_socket(void) {
+    if (multicast_sock >= 0) {
+        close(multicast_sock);
+        multicast_sock = -1;
     }
-
-    // Find connection data line
-    const char *c_line = strstr(sdp, "c=IN IP4 ");
-    if (c_line) {
-        // Use field width limit to prevent buffer overflow
-        sscanf(c_line, "c=IN IP4 %15s", ip_addr);
-        ip_addr[15] = '\0';  // Ensure null termination
-    } else {
-        return false;
-    }
-
-    return true;
 }
 
-
-static void sap_handler(void *pvParameters) {
-    char rx_buffer[SAP_BUFFER_SIZE];
-    struct sockaddr_in source_addr;
-    socklen_t socklen = sizeof(source_addr);
-    fd_set read_fds;
-    struct timeval tv;
-
-    while (1) {
-        // Setup select with timeout
-        FD_ZERO(&read_fds);
-        FD_SET(sap_sock, &read_fds);
-        tv.tv_sec = 0;
-        tv.tv_usec = 100000;  // 100ms timeout
-
-        int select_result = select(sap_sock + 1, &read_fds, NULL, NULL, &tv);
-        
-        if (select_result < 0) {
-            ESP_LOGE(TAG, "SAP select failed: errno %d", errno);
-            vTaskDelay(pdMS_TO_TICKS(10));
-            continue;
-        } else if (select_result == 0) {
-            // Timeout, no data available
-            continue;
-        }
-
-        // Data is available, read it
-        int len = recvfrom(sap_sock, rx_buffer, sizeof(rx_buffer) - 1, 0, (struct sockaddr *)&source_addr, &socklen);
-        if (len < 0) {
-            if (errno != EAGAIN && errno != EWOULDBLOCK) {
-                ESP_LOGE(TAG, "SAP recvfrom failed: errno %d", errno);
-            }
-            continue;
-        }
-
-        rx_buffer[len] = 0; // Null-terminate
-        ESP_LOGD(TAG, "Received SAP announcement: %s", rx_buffer);
-
-        uint32_t sample_rate = 0;
-        char ip_addr[16] = {0};
-
-        if (parse_sdp_and_get_rate(rx_buffer, &sample_rate, ip_addr, sizeof(ip_addr))) {
-            esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
-            if (netif) {
-                esp_netif_ip_info_t ip_info;
-                esp_netif_get_ip_info(netif, &ip_info);
-                char my_ip_str[16];
-                sprintf(my_ip_str, IPSTR, IP2STR(&ip_info.ip));
-
-                if (strcmp(ip_addr, my_ip_str) == 0) {
-                    ESP_LOGI(TAG, "SAP announcement matches our IP. Detected sample rate: %lu", sample_rate);
-                    lifecycle_manager_change_sample_rate(sample_rate);
-                }
-            }
-        }
-    }
-    vTaskDelete(NULL);
-}
+// SAP handler moved to sap_listener.c
 
 static void udp_handler(void *pvParameters) {
     // RTP packet buffer - allocate enough for maximum possible RTP packet
@@ -207,25 +135,57 @@ static void udp_handler(void *pvParameters) {
     struct timeval tv;
 
     while (1) {
-        // Setup select with short timeout
+        // Setup select with both sockets
         FD_ZERO(&read_fds);
-        FD_SET(sock, &read_fds);
+        int max_fd = -1;
+        
+        if (unicast_sock >= 0) {
+            FD_SET(unicast_sock, &read_fds);
+            max_fd = unicast_sock;
+        }
+        
+        if (multicast_sock >= 0) {
+            FD_SET(multicast_sock, &read_fds);
+            if (multicast_sock > max_fd) {
+                max_fd = multicast_sock;
+            }
+        }
+        
+        // If no sockets are active, wait and retry
+        if (max_fd < 0) {
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
+        }
+
         tv.tv_sec = 0;
         tv.tv_usec = 0;
 
-        int select_result = select(sock + 1, &read_fds, NULL, NULL, &tv);
+        int select_result = select(max_fd + 1, &read_fds, NULL, NULL, &tv);
         
         if (select_result < 0) {
             ESP_LOGE(TAG, "select failed: errno %d", errno);
-            break;
+            vTaskDelay(pdMS_TO_TICKS(10));
+            continue;
         } else if (select_result == 0) {
             // Timeout, no data available - yield to other tasks
             vTaskDelay(0);
             continue;
         }
 
+        // Check which socket has data and read from it
+        int active_sock = -1;
+        if (unicast_sock >= 0 && FD_ISSET(unicast_sock, &read_fds)) {
+            active_sock = unicast_sock;
+        } else if (multicast_sock >= 0 && FD_ISSET(multicast_sock, &read_fds)) {
+            active_sock = multicast_sock;
+        }
+        
+        if (active_sock < 0) {
+            continue;  // No data available
+        }
+
         // Data is available, read it
-        int len = recvfrom(sock, rx_buffer, sizeof(rx_buffer), 0,
+        int len = recvfrom(active_sock, rx_buffer, sizeof(rx_buffer), 0,
                           (struct sockaddr *)&source_addr, &socklen);
 
         if (len < 0) {
@@ -243,7 +203,7 @@ static void udp_handler(void *pvParameters) {
 
         // Parse RTP header
         rtp_header_t *rtp = (rtp_header_t *)rx_buffer;
-        
+
         // Validate RTP version (should be 2)
         uint8_t version = RTP_VERSION(rtp->vpxcc);
         if (version != 2) {
@@ -254,6 +214,24 @@ static void udp_handler(void *pvParameters) {
                 ESP_LOGW(TAG, "  [%02d]: 0x%02X", i, (uint8_t)rx_buffer[i]);
             }
             continue;
+        }
+
+        // Filter by SSRC if in multicast mode
+        if (multicast_config.enabled && multicast_config.filter_by_ssrc) {
+            uint32_t packet_ssrc = ntohl(rtp->ssrc);
+            if (packet_ssrc != multicast_config.ssrc_filter) {
+                static uint32_t filtered_count = 0;
+                static uint32_t last_logged_ssrc = 0;
+                filtered_count++;
+
+                // Log different SSRCs we're filtering out (but not too frequently)
+                if (packet_ssrc != last_logged_ssrc || filtered_count % 1000 == 0) {
+                    ESP_LOGD(TAG, "Filtering out packet with SSRC 0x%08X (expected 0x%08X), filtered=%u",
+                            packet_ssrc, multicast_config.ssrc_filter, filtered_count);
+                    last_logged_ssrc = packet_ssrc;
+                }
+                continue;
+            }
         }
 
         // Calculate actual header size based on CSRC count
@@ -354,6 +332,9 @@ static void udp_handler(void *pvParameters) {
         // Only push to audio output if we have the expected chunk size
         // This maintains compatibility with existing audio pipeline
         if (payload_len == PCM_CHUNK_SIZE) {
+            // Feed PCM data to visualizer (after RTP extraction and byte order conversion)
+            pcm_viz_write(audio_data, PCM_CHUNK_SIZE);
+            
             push_chunk(audio_data);
         } else {
             // For non-standard sizes, we'd need to buffer and repackage
@@ -372,8 +353,9 @@ static void udp_handler(void *pvParameters) {
             if (total > 0) {
                 loss_rate = (float)packets_lost / (float)total * 100.0f;
             }
-            ESP_LOGI(TAG, "RTP RX Stats: Received=%u, Lost=%u, Loss=%.2f%%, vpxcc=0x%02X (V=%d), PT=%d",
+            ESP_LOGI(TAG, "RTP RX Stats: Received=%u, Lost=%u, Loss=%.2f%%, Mode=%s, vpxcc=0x%02X (V=%d), PT=%d",
                     packets_received, packets_lost, loss_rate,
+                    multicast_config.enabled ? "Multicast" : "Unicast",
                     rtp->vpxcc, RTP_VERSION(rtp->vpxcc), RTP_PT(rtp->mpt));
             stats_counter = 0;
         }
@@ -387,39 +369,11 @@ esp_err_t network_init(void) {
     
     create_udp_server();
 
-    xTaskCreatePinnedToCore(udp_handler, "udp_handler", 4096, NULL,
+    xTaskCreatePinnedToCore(udp_handler, "udp_handler", 8192, NULL,
                            5, &udp_handler_task, 1);
 
-    // Create SAP listener socket
-    struct sockaddr_in sap_addr;
-    sap_sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
-    if (sap_sock < 0) {
-        ESP_LOGE(TAG, "Unable to create SAP socket: errno %d", errno);
-    } else {
-        int reuse = 1;
-        setsockopt(sap_sock, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
-        
-        memset(&sap_addr, 0, sizeof(sap_addr));
-        sap_addr.sin_family = AF_INET;
-        sap_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-        sap_addr.sin_port = htons(SAP_PORT);
-        if (bind(sap_sock, (struct sockaddr *)&sap_addr, sizeof(sap_addr)) < 0) {
-            ESP_LOGE(TAG, "SAP socket unable to bind: errno %d", errno);
-            close(sap_sock);
-            sap_sock = -1;
-        } else {
-            // Join multicast group
-            struct ip_mreq mreq;
-            mreq.imr_multiaddr.s_addr = inet_addr(SAP_MULTICAST_ADDR);
-            mreq.imr_interface.s_addr = htonl(INADDR_ANY);
-            if (setsockopt(sap_sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq)) < 0) {
-                ESP_LOGE(TAG, "Failed to join SAP multicast group");
-            } else {
-                 ESP_LOGI(TAG, "SAP listener started on port %d", SAP_PORT);
-                 xTaskCreatePinnedToCore(sap_handler, "sap_handler", 4096, NULL, 1, &sap_handler_task, 0);
-            }
-        }
-    }
+    // SAP listener functionality moved to sap_listener module
+    // It will be started by the lifecycle manager
 
     ESP_LOGI(TAG, "Network receiver started");
     return ESP_OK;
@@ -452,14 +406,240 @@ esp_err_t network_update_port(void) {
     
     // Create new socket with updated port
     create_udp_server();
-    
-    if (sock < 0) {
-        ESP_LOGE(TAG, "Failed to create socket with new port %d", new_port);
-        return ESP_FAIL;
-    }
-    
+
     ESP_LOGI(TAG, "Network port successfully updated to %d", new_port);
     return ESP_OK;
+}
+
+esp_err_t network_join_multicast(const char* multicast_ip, uint16_t port, uint32_t ssrc) {
+    if (!multicast_ip) {
+        ESP_LOGE(TAG, "Invalid multicast IP");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    // Check if we're already connected to this exact multicast group with same parameters
+    if (multicast_config.enabled &&
+        strcmp(multicast_config.multicast_ip, multicast_ip) == 0 &&
+        multicast_config.port == port &&
+        multicast_config.ssrc_filter == ssrc) {
+        ESP_LOGI(TAG, "Already connected to multicast group %s:%d with SSRC 0x%08X - skipping rejoin",
+                multicast_ip, port, ssrc);
+        return ESP_OK;
+    }
+
+    ESP_LOGI(TAG, "Joining multicast group %s:%d with SSRC filter 0x%08X", multicast_ip, port, ssrc);
+
+    // Leave current multicast group if already joined
+    if (multicast_config.enabled) {
+        network_leave_multicast();
+    }
+
+    // Store new configuration
+    strncpy(multicast_config.multicast_ip, multicast_ip, sizeof(multicast_config.multicast_ip) - 1);
+    multicast_config.multicast_ip[sizeof(multicast_config.multicast_ip) - 1] = '\0';
+    multicast_config.port = port;
+    multicast_config.ssrc_filter = ssrc;
+    multicast_config.filter_by_ssrc = true;
+
+    // Close existing multicast socket if any
+    close_multicast_socket();
+
+    // Create new multicast socket
+    multicast_sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
+    if (multicast_sock < 0) {
+        ESP_LOGE(TAG, "Unable to create multicast socket: errno %d", errno);
+        return ESP_FAIL;
+    }
+
+    // Set socket options for multicast
+    int reuse = 1;
+    setsockopt(multicast_sock, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+
+    // Set non-blocking
+    int flags = fcntl(multicast_sock, F_GETFL, 0);
+    fcntl(multicast_sock, F_SETFL, flags | O_NONBLOCK);
+
+    // Bind to multicast port (use INADDR_ANY to receive multicast)
+    struct sockaddr_in dest_addr;
+    memset(&dest_addr, 0, sizeof(dest_addr));
+    dest_addr.sin_family = AF_INET;
+    dest_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    dest_addr.sin_port = htons(port);
+
+    int err = bind(multicast_sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+    if (err < 0) {
+        ESP_LOGE(TAG, "Multicast socket unable to bind to port %d: errno %d", port, errno);
+        close(multicast_sock);
+        multicast_sock = -1;
+        return ESP_FAIL;
+    }
+
+    // Join multicast group
+    multicast_config.mreq.imr_multiaddr.s_addr = inet_addr(multicast_ip);
+    multicast_config.mreq.imr_interface.s_addr = htonl(INADDR_ANY);
+
+    err = setsockopt(multicast_sock, IPPROTO_IP, IP_ADD_MEMBERSHIP,
+                     &multicast_config.mreq, sizeof(multicast_config.mreq));
+    if (err < 0) {
+        ESP_LOGE(TAG, "Failed to join multicast group %s: errno %d", multicast_ip, errno);
+        close(multicast_sock);
+        multicast_sock = -1;
+        return ESP_FAIL;
+    }
+
+    multicast_config.enabled = true;
+    ESP_LOGI(TAG, "Successfully joined multicast group %s:%d (unicast socket remains active)", multicast_ip, port);
+
+    return ESP_OK;
+}
+
+esp_err_t network_leave_multicast(void) {
+    if (!multicast_config.enabled) {
+        ESP_LOGW(TAG, "Not currently in multicast mode");
+        return ESP_OK;
+    }
+
+    ESP_LOGI(TAG, "Leaving multicast group %s", multicast_config.multicast_ip);
+
+    // Leave multicast group
+    if (multicast_sock >= 0) {
+        int err = setsockopt(multicast_sock, IPPROTO_IP, IP_DROP_MEMBERSHIP,
+                            &multicast_config.mreq, sizeof(multicast_config.mreq));
+        if (err < 0) {
+            ESP_LOGW(TAG, "Failed to leave multicast group: errno %d", errno);
+        }
+    }
+
+    // Close multicast socket
+    close_multicast_socket();
+
+    // Reset multicast configuration
+    multicast_config.enabled = false;
+    multicast_config.filter_by_ssrc = false;
+    multicast_config.ssrc_filter = 0;
+    memset(multicast_config.multicast_ip, 0, sizeof(multicast_config.multicast_ip));
+
+    ESP_LOGI(TAG, "Left multicast group (unicast socket remains active)");
+    return ESP_OK;
+}
+
+bool network_is_multicast_enabled(void) {
+    return multicast_config.enabled;
+}
+
+void network_get_multicast_info(char* ip, uint16_t* port, uint32_t* ssrc) {
+    if (ip) {
+        strcpy(ip, multicast_config.multicast_ip);
+    }
+    if (port) {
+        *port = multicast_config.port;
+    }
+    if (ssrc) {
+        *ssrc = multicast_config.ssrc_filter;
+    }
+}
+
+// Check if an IP address is in the multicast range (224.0.0.0 - 239.255.255.255)
+static bool is_multicast_ip(const char* ip) {
+    if (!ip) return false;
+
+    struct in_addr addr;
+    if (inet_pton(AF_INET, ip, &addr) != 1) {
+        return false;
+    }
+
+    uint32_t ip_num = ntohl(addr.s_addr);
+    uint8_t first_octet = (ip_num >> 24) & 0xFF;
+
+    // Multicast addresses are in the range 224.0.0.0 to 239.255.255.255
+    return (first_octet >= 224 && first_octet <= 239);
+}
+
+// Check if an IP address matches one of our local interface IPs
+static bool is_local_interface_ip(const char* ip) {
+    if (!ip) return false;
+
+    esp_netif_ip_info_t ip_info;
+    esp_netif_t *netif = NULL;
+
+    // Check WiFi STA interface
+    netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    if (netif) {
+        if (esp_netif_get_ip_info(netif, &ip_info) == ESP_OK) {
+            char local_ip[16];
+            esp_ip4addr_ntoa(&ip_info.ip, local_ip, sizeof(local_ip));
+            if (strcmp(local_ip, ip) == 0) {
+                return true;
+            }
+        }
+    }
+
+    // Check WiFi AP interface (if active)
+    netif = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
+    if (netif) {
+        if (esp_netif_get_ip_info(netif, &ip_info) == ESP_OK) {
+            char local_ip[16];
+            esp_ip4addr_ntoa(&ip_info.ip, local_ip, sizeof(local_ip));
+            if (strcmp(local_ip, ip) == 0) {
+                return true;
+            }
+        }
+    }
+
+    // Check Ethernet interface (if available)
+    netif = esp_netif_get_handle_from_ifkey("ETH_DEF");
+    if (netif) {
+        if (esp_netif_get_ip_info(netif, &ip_info) == ESP_OK) {
+            char local_ip[16];
+            esp_ip4addr_ntoa(&ip_info.ip, local_ip, sizeof(local_ip));
+            if (strcmp(local_ip, ip) == 0) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+esp_err_t network_configure_stream(const char* dest_ip, const char* source_ip, uint16_t port) {
+    if (!dest_ip || !source_ip) {
+        ESP_LOGE(TAG, "Invalid parameters for stream configuration");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    ESP_LOGI(TAG, "Configuring stream: dest=%s, source=%s, port=%d", dest_ip, source_ip, port);
+
+    // Check if destination IP is multicast
+    if (is_multicast_ip(dest_ip)) {
+        ESP_LOGI(TAG, "Destination is multicast address, joining multicast group");
+
+        // Generate SSRC from source IP and port for filtering
+        // This helps filter packets when multiple sources send to the same multicast group
+        uint32_t ssrc = 0;
+        int last_octet = 0;
+        if (sscanf(source_ip, "%*d.%*d.%*d.%d", &last_octet) == 1) {
+            ssrc = (last_octet << 16) | port;
+        }
+
+        return network_join_multicast(dest_ip, port, ssrc);
+    } else if (is_local_interface_ip(dest_ip)) {
+        ESP_LOGI(TAG, "Destination is local interface address, unicast reception already configured");
+
+        // For unicast to our local IP, the configured port socket is already listening
+        // Just leave any existing multicast group if active
+        if (multicast_config.enabled) {
+            network_leave_multicast();
+        }
+
+        // Note: We do NOT update the port from SAP announcements
+        // The configured port socket remains on its configured port
+        ESP_LOGI(TAG, "Unicast socket listening on configured port, SAP announcement port (%d) ignored", port);
+
+        return ESP_OK;
+    } else {
+        ESP_LOGW(TAG, "Destination IP %s is neither a local interface IP nor a multicast address - ignoring configuration", dest_ip);
+        return ESP_ERR_INVALID_ARG;
+    }
 }
 
 void get_rtp_statistics(uint32_t *received, uint32_t *lost, float *loss_rate) {
@@ -486,16 +666,9 @@ esp_err_t network_deinit(void) {
         vTaskDelete(udp_handler_task);
         udp_handler_task = NULL;
     }
-    if (sap_handler_task) {
-        vTaskDelete(sap_handler_task);
-        sap_handler_task = NULL;
-    }
     
     close_udp_server();
-    if (sap_sock >= 0) {
-        close(sap_sock);
-        sap_sock = -1;
-    }
+    close_multicast_socket();
     
     ESP_LOGI(TAG, "Network receiver stopped");
     return ESP_OK;

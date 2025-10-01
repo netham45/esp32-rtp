@@ -54,6 +54,9 @@ static app_config_t s_app_config;
 // Setup wizard keys
 #define NVS_KEY_SETUP_WIZARD_COMPLETED "wizard_done"
 
+// SAP keys
+#define NVS_KEY_SAP_STREAM_NAME "sap_stream"
+
 /**
  * Initialize with default values from config.h
  */
@@ -127,7 +130,10 @@ static void set_default_config(void) {
     
     // Setup wizard defaults
     s_app_config.setup_wizard_completed = false;     // Wizard not completed by default
-    
+
+    // SAP defaults
+    s_app_config.sap_stream_name[0] = '\0';          // No stream selected by default
+
     // Device mode defaults based on build type
     #ifdef IS_USB
     s_app_config.device_mode = MODE_RECEIVER_USB;
@@ -332,7 +338,14 @@ esp_err_t config_manager_init(void) {
     if (err == ESP_OK) {
         s_app_config.setup_wizard_completed = (bool)u8_value;
     }
-    
+
+    // Read SAP stream name
+    size_t sap_len = sizeof(s_app_config.sap_stream_name);
+    err = nvs_get_str(nvs_handle, NVS_KEY_SAP_STREAM_NAME, s_app_config.sap_stream_name, &sap_len);
+    if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGE(TAG, "Error reading SAP stream name: %s", esp_err_to_name(err));
+    }
+
     // Read device mode (new enum-based configuration)
     err = nvs_get_u8(nvs_handle, NVS_KEY_DEVICE_MODE, &u8_value);
     if (err == ESP_OK) {
@@ -653,7 +666,15 @@ esp_err_t config_manager_save_config(void) {
         nvs_close(nvs_handle);
         return err;
     }
-    
+
+    // Save SAP stream name
+    err = nvs_set_str(nvs_handle, NVS_KEY_SAP_STREAM_NAME, s_app_config.sap_stream_name);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Error saving SAP stream name: %s", esp_err_to_name(err));
+        nvs_close(nvs_handle);
+        return err;
+    }
+
     // Save device mode (new enum-based configuration)
     err = nvs_set_u8(nvs_handle, NVS_KEY_DEVICE_MODE, (uint8_t)s_app_config.device_mode);
     if (err != ESP_OK) {
@@ -789,6 +810,10 @@ esp_err_t config_manager_save_setting(const char* key, void* value, size_t size)
     } else if (strcmp(key, NVS_KEY_SETUP_WIZARD_COMPLETED) == 0 && size == sizeof(bool)) {
         s_app_config.setup_wizard_completed = *(bool*)value;
         err = nvs_set_u8(nvs_handle, key, (uint8_t)s_app_config.setup_wizard_completed);
+    } else if (strcmp(key, NVS_KEY_SAP_STREAM_NAME) == 0) {
+        strncpy(s_app_config.sap_stream_name, (char*)value, sizeof(s_app_config.sap_stream_name) - 1);
+        s_app_config.sap_stream_name[sizeof(s_app_config.sap_stream_name) - 1] = '\0';
+        err = nvs_set_str(nvs_handle, key, s_app_config.sap_stream_name);
     } else if (strcmp(key, NVS_KEY_DEVICE_MODE) == 0 && size == sizeof(uint8_t)) {
         s_app_config.device_mode = (device_mode_t)(*(uint8_t*)value);
         err = nvs_set_u8(nvs_handle, key, (uint8_t)s_app_config.device_mode);

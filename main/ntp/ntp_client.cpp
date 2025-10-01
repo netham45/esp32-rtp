@@ -803,5 +803,5 @@ static void ntp_client_task(void *pvParameters) {
 }
 
 extern "C" void initialize_ntp_client() { // Ensure C linkage for app_main
-    xTaskCreatePinnedToCore(ntp_client_task, "ntp_client_task", 4096, NULL, 2, NULL, 0); // Increased stack size
+    xTaskCreatePinnedToCore(ntp_client_task, "ntp_client_task", 4096, NULL, 5, NULL, 0);
 }

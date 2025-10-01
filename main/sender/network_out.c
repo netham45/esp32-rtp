@@ -20,6 +20,7 @@
 #include "spdif_in/spdif_in.h"
 #include "usb_in.h"
 #include "config/config_manager.h"  // For device_mode_t enum
+#include "visualizer/pcm_visualizer.h"  // For pcm_viz_write
 
 // RTP header structure (12 bytes)
 typedef struct __attribute__((packed)) {
@@ -87,7 +88,8 @@ static char s_device_name[32] = "ESP32-Audio";
 static char s_local_ip[16] = {0};
 
 // Buffer for audio data
-static char s_data_out[PACKET_SIZE];
+static unsigned char rtp_packet[PACKET_SIZE];
+char audio_buffer[CHUNK_SIZE];
 
 // Forward declarations for multicast helper functions
 static bool is_multicast_address(const char *ip_str);
@@ -158,7 +160,7 @@ static int generate_sdp_message(char *sdp_buffer, size_t buffer_size)
     int len = snprintf(sdp_buffer, buffer_size,
         "v=0\r\n"
         "o=- %u %u IN IP4 %s\r\n"
-        "s=ESP32 Audio Stream\r\n"
+        "s=%s\r\n"
         "i=48kHz 16-bit Stereo Audio from %s\r\n"
         "c=IN IP4 %s\r\n"
         "t=0 0\r\n"
@@ -167,6 +169,7 @@ static int generate_sdp_message(char *sdp_buffer, size_t buffer_size)
         "a=rtpmap:%d L16/48000/2\r\n"
         "a=ptime:6\r\n",
         session_id, session_id, s_local_ip,
+        s_device_name,
         s_device_name,
         dest_ip,
         dest_port,
@@ -182,7 +185,7 @@ static void sap_announcement_task(void *arg)
     uint8_t sap_packet[600];
     sap_header_t *sap_header = (sap_header_t *)sap_packet;
     
-    ESP_LOGI(TAG, "SAP announcement task started");
+    //ESP_LOGI(TAG, "SAP announcement task started");
     
     // Initialize SAP header
     sap_header->flags = 0x20;  // V=1, no authentication, IPv4
@@ -200,33 +203,49 @@ static void sap_announcement_task(void *arg)
     while (s_is_sender_running) {
         // Generate SDP content
         int sdp_len = generate_sdp_message(sdp_buffer, sizeof(sdp_buffer));
-        if (sdp_len < 0) {
-            ESP_LOGE(TAG, "Failed to generate SDP message");
+        if (sdp_len < 0 || sdp_len >= sizeof(sdp_buffer)) {
+            ESP_LOGE(TAG, "Failed to generate SDP message or message too large");
             vTaskDelay(pdMS_TO_TICKS(5000));
             continue;
         }
         
         // Add MIME type after SAP header
-        char *payload_ptr = (char *)(sap_packet + sizeof(sap_header_t));
         const char *mime_type = "application/sdp";
-        int mime_len = strlen(mime_type);
+        size_t mime_len = strlen(mime_type);
         
-        // Check bounds before copying
-        if (sizeof(sap_header_t) + mime_len + 1 + sdp_len > sizeof(sap_packet)) {
-            ESP_LOGE(TAG, "SAP packet too large (%zu bytes), skipping",
-                     sizeof(sap_header_t) + mime_len + 1 + sdp_len);
+        // Calculate required size and check bounds BEFORE any memcpy
+        size_t required_size = sizeof(sap_header_t) + mime_len + 1 + sdp_len;
+        if (required_size > sizeof(sap_packet)) {
+            ESP_LOGE(TAG, "SAP packet too large (%zu bytes > %zu), skipping",
+                     required_size, sizeof(sap_packet));
             vTaskDelay(pdMS_TO_TICKS(5000));
             continue;
         }
         
+        // Now safe to copy - use bounded operations
+        char *payload_ptr = (char *)(sap_packet + sizeof(sap_header_t));
+        size_t remaining_space = sizeof(sap_packet) - sizeof(sap_header_t);
+        
+        // Copy MIME type
+        if (mime_len >= remaining_space) {
+            ESP_LOGE(TAG, "MIME type too long, skipping");
+            vTaskDelay(pdMS_TO_TICKS(5000));
+            continue;
+        }
         memcpy(payload_ptr, mime_type, mime_len);
         payload_ptr[mime_len] = '\0';
+        remaining_space -= (mime_len + 1);
         
         // Copy SDP after MIME type
+        if (sdp_len > remaining_space) {
+            ESP_LOGE(TAG, "SDP content too long, skipping");
+            vTaskDelay(pdMS_TO_TICKS(5000));
+            continue;
+        }
         memcpy(payload_ptr + mime_len + 1, sdp_buffer, sdp_len);
         
-        // Calculate total packet size
-        size_t packet_size = sizeof(sap_header_t) + mime_len + 1 + sdp_len;
+        // Calculate total packet size (already validated above)
+        size_t packet_size = required_size;
         
         // Send SAP announcement
         int sent = sendto(s_sap_sock, sap_packet, packet_size, 0,
@@ -242,7 +261,7 @@ static void sap_announcement_task(void *arg)
         vTaskDelay(pdMS_TO_TICKS(SAP_ANNOUNCE_INTERVAL_MS));
     }
     
-    ESP_LOGI(TAG, "SAP announcement task stopping");
+    //ESP_LOGI(TAG, "SAP announcement task stopping");
     vTaskDelete(NULL);
 }
 
@@ -358,9 +377,9 @@ esp_err_t rtp_sender_start(void)
     // Create the sender task
     xTaskCreatePinnedToCore(rtp_sender_task, "rtp_sender_task", 8192, NULL, 5, &s_sender_task_handle, 1);
     
-    // Create the SAP announcement task
+    // Create the SAP announcement task - needs more stack for large buffers
     xTaskCreatePinnedToCore(sap_announcement_task, "sap_announce_task",
-                           4096, NULL, 3, &s_sap_task_handle, 0);
+                           4096, NULL, 5, &s_sap_task_handle, 0);
     
     ESP_LOGI(TAG, "SAP announcement task started");
     
@@ -383,15 +402,14 @@ esp_err_t rtp_sender_stop(void)
     
     s_is_sender_running = false;
 
-    // Stop and delete the sender task
-    if (s_sender_task_handle) {
-        vTaskDelete(s_sender_task_handle);
+    // Wait for tasks to self-delete (they both check s_is_sender_running and call vTaskDelete(NULL))
+    // Give them time to clean up properly
+    if (s_sender_task_handle || s_sap_task_handle) {
+        ESP_LOGI(TAG, "Waiting for sender tasks to finish...");
+        vTaskDelay(pdMS_TO_TICKS(100)); // Give tasks time to exit cleanly
+        
+        // Clear handles since tasks self-delete
         s_sender_task_handle = NULL;
-    }
-
-    // Stop and delete the SAP announcement task
-    if (s_sap_task_handle) {
-        vTaskDelete(s_sap_task_handle);
         s_sap_task_handle = NULL;
     }
 
@@ -559,7 +577,6 @@ static esp_err_t handle_multicast_membership(int sock, const char *multicast_ip,
 
 static void rtp_sender_task(void *arg)
 {
-    char audio_buffer[CHUNK_SIZE];
     size_t bytes_in_buffer = 0;
 
     // For pacing the sender to match the audio rate
@@ -626,8 +643,10 @@ static void rtp_sender_task(void *arg)
                 }
             }
 
+            // Feed PCM data to visualizer (after volume adjustment, before RTP packet construction)
+            pcm_viz_write((const uint8_t*)audio_buffer, CHUNK_SIZE);
+
             // Build RTP packet
-            uint8_t rtp_packet[PACKET_SIZE];
             build_rtp_packet(rtp_packet, (uint8_t*)audio_buffer, CHUNK_SIZE);
 
             int sent = -1;
@@ -651,4 +670,7 @@ static void rtp_sender_task(void *arg)
             vTaskDelayUntil(&xLastWakeTime, xFrequency);
         }
     }
+    
+    ESP_LOGI(TAG, "RTP sender task exiting, deleting task");
+    vTaskDelete(NULL);
 }

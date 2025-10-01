@@ -21,7 +21,8 @@ typedef enum {
     LIFECYCLE_EVENT_CANCEL_PAIRING,
     LIFECYCLE_EVENT_MDNS_DEVICE_FOUND,      // mDNS device discovered
     LIFECYCLE_EVENT_MDNS_DEVICE_LOST,       // mDNS device lost
-    LIFECYCLE_EVENT_SAMPLE_RATE_CHANGE      // Sample rate change requested
+    LIFECYCLE_EVENT_SAMPLE_RATE_CHANGE,     // Sample rate change requested
+    LIFECYCLE_EVENT_SAP_STREAM_FOUND        // SAP stream announcement received
 } lifecycle_event_t;
 
 // Define the possible states of the lifecycle manager
@@ -66,6 +67,22 @@ esp_err_t lifecycle_manager_post_event(lifecycle_event_t event);
  * @return ESP_OK on success, or an error code on failure.
  */
 esp_err_t lifecycle_manager_change_sample_rate(uint32_t new_rate);
+
+/**
+ * @brief Notify lifecycle manager about a SAP stream announcement.
+ *
+ * @param stream_name The name of the stream
+ * @param destination_ip The destination IP (multicast or unicast)
+ * @param source_ip The source IP of the announcement
+ * @param port The port number
+ * @param sample_rate The sample rate
+ * @return ESP_OK on success, or an error code on failure.
+ */
+esp_err_t lifecycle_manager_notify_sap_stream(const char* stream_name,
+                                              const char* destination_ip,
+                                              const char* source_ip,
+                                              uint16_t port,
+                                              uint32_t sample_rate);
 
 /**
  * @brief Report network activity to the lifecycle manager.
@@ -408,87 +425,23 @@ esp_err_t lifecycle_set_discovery_interval_ms(uint32_t interval_ms);
 esp_err_t lifecycle_set_auto_select_best_device(bool enable);
 
 /**
- * @brief Configuration update structure for batch updates
+ * @brief Get the SAP stream name to automatically connect to
+ * @return Pointer to the SAP stream name string
  */
-typedef struct {
-    bool update_port;
-    uint16_t port;
+const char* lifecycle_get_sap_stream_name(void);
 
-    bool update_hostname;
-    const char* hostname;
+/**
+ * @brief Set the SAP stream name to automatically connect to
+ * @param stream_name The SAP stream name (empty string to disable auto-connect)
+ * @return ESP_OK on success, or an error code on failure
+ */
+esp_err_t lifecycle_set_sap_stream_name(const char* stream_name);
 
-    bool update_volume;
-    float volume;
-    
-    bool update_device_mode;
-    device_mode_t device_mode;
-    
-    bool update_enable_usb_sender;  // Legacy compatibility
-    bool enable_usb_sender;
-    
-    bool update_enable_spdif_sender;  // Legacy compatibility
-    bool enable_spdif_sender;
-    
-    bool update_ap_ssid;
-    const char* ap_ssid;
-    
-    bool update_ap_password;
-    const char* ap_password;
-    
-    bool update_hide_ap_when_connected;
-    bool hide_ap_when_connected;
-    
-    bool update_sender_destination_ip;
-    const char* sender_destination_ip;
-    
-    bool update_sender_destination_port;
-    uint16_t sender_destination_port;
-    
-    bool update_initial_buffer_size;
-    uint8_t initial_buffer_size;
-    
-    bool update_max_buffer_size;
-    uint8_t max_buffer_size;
-    
-    bool update_buffer_grow_step_size;
-    uint8_t buffer_grow_step_size;
-    
-    bool update_max_grow_size;
-    uint8_t max_grow_size;
-    
-    bool update_spdif_data_pin;
-    uint8_t spdif_data_pin;
-    
-    bool update_use_direct_write;
-    bool use_direct_write;
-    
-    bool update_silence_threshold_ms;
-    uint32_t silence_threshold_ms;
-    
-    bool update_network_check_interval_ms;
-    uint32_t network_check_interval_ms;
-    
-    bool update_activity_threshold_packets;
-    uint8_t activity_threshold_packets;
-    
-    bool update_silence_amplitude_threshold;
-    uint16_t silence_amplitude_threshold;
-    
-    bool update_network_inactivity_timeout_ms;
-    uint32_t network_inactivity_timeout_ms;
-    
-    bool update_enable_mdns_discovery;
-    bool enable_mdns_discovery;
-    
-    bool update_discovery_interval_ms;
-    uint32_t discovery_interval_ms;
-    
-    bool update_auto_select_best_device;
-    bool auto_select_best_device;
-    
-    bool update_setup_wizard_completed;
-    bool setup_wizard_completed;
-} lifecycle_config_update_t;
+/**
+ * @brief Configuration update structure for batch updates
+ * (Full definition in lifecycle/config.h)
+ */
+typedef struct lifecycle_config_update lifecycle_config_update_t;
 
 /**
  * @brief Update multiple configuration settings at once

@@ -9,6 +9,24 @@ set(WEB_FILES
     "${WEB_SRC_DIR}/wizard.js"
     "${WEB_SRC_DIR}/wizard.html"
     "${WEB_SRC_DIR}/wizard.css"
+    "${WEB_SRC_DIR}/sap.html"
+    "${WEB_SRC_DIR}/sap.js"
+)
+
+# Web route module files
+set(WEB_ROUTES_SRCS
+    "web/routes/route_helpers.c"
+    "web/routes/static_routes.c"
+    "web/routes/wifi_routes.c"
+    "web/routes/settings_routes.c"
+    "web/routes/discovery_routes.c"
+    "web/routes/pairing_routes.c"
+    "web/routes/battery_routes.c"
+    "web/routes/ota_routes.c"
+    "web/routes/logs_routes.c"
+    "web/routes/sap_routes.c"
+    "web/routes/captive_portal_routes.c"
+    "web/routes/routes.c"
 )
 
 # BQ25895 battery charger files
@@ -28,6 +46,18 @@ set(LOGGING_SRCS
     "logging/log_buffer.c"
 )
 
+# Lifecycle manager module files
+set(LIFECYCLE_SRCS
+    "lifecycle/hw_init.c"
+    "lifecycle/services.c"
+    "lifecycle/sap.c"
+    "lifecycle/config.c"
+    "lifecycle/sleep.c"
+    "lifecycle/reconfig.c"
+    "lifecycle/modes.c"
+    "lifecycle/state_machine.c"
+)
+
 set(SENDER_SRCS
     "sender/spdif_in/histogram.c"
     "sender/spdif_in/spdif_in.c"
@@ -38,10 +68,17 @@ set (RECEIVER_SRCS
     "receiver/audio_out.c"
     "receiver/buffer.c"
     "receiver/network_in.c"
+    "receiver/sap_listener.c"
     "receiver/spdif_out.c"
     "receiver/usb_out.c"
 )
 
+# Visualizer module files
+set(VISUALIZER_SRCS
+    "visualizer/pcm_visualizer.c"
+    "visualizer/led_strip_controller.c"
+    "visualizer/visualizer_task.c"
+)
 
 idf_component_register(SRCS "esp32-rtp.c"
                            "lifecycle_manager.c"
@@ -54,13 +91,14 @@ idf_component_register(SRCS "esp32-rtp.c"
                            "web/web_server.c"
                            "wifi/wifi_manager.c"
                            "TS3USB30ERSWR/usb_switch.c"
+                           ${WEB_ROUTES_SRCS}
                            ${BQ25895_SRCS}
                            ${OTA_SRCS}
                            ${LOGGING_SRCS}
+                           ${LIFECYCLE_SRCS}
                            ${SENDER_SRCS}
                            ${RECEIVER_SRCS}
+                           ${VISUALIZER_SRCS}
                       INCLUDE_DIRS "."
                       EMBED_FILES ${WEB_FILES})
 
-# Enable C++ exceptions if not already enabled globally
-target_compile_options(${COMPONENT_LIB} PRIVATE "-fexceptions")

@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SAP Announcements</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            padding: 20px;
+        }
+        h1 {
+            color: #333;
+            margin-top: 0;
+        }
+        .refresh-info {
+            margin-bottom: 20px;
+            color: #666;
+            font-size: 14px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        th {
+            background-color: #f8f8f8;
+            font-weight: 600;
+            color: #555;
+        }
+        tr:hover {
+            background-color: #f9f9f9;
+        }
+        .status {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        .status.active {
+            background-color: #4caf50;
+        }
+        .status.inactive {
+            background-color: #ccc;
+        }
+        .no-data {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+        }
+        .error {
+            background-color: #ffebee;
+            color: #c62828;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+        }
+        .time-ago {
+            color: #999;
+            font-size: 12px;
+        }
+        .listening-status {
+            background-color: #e3f2fd;
+            border-left: 4px solid #2196f3;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 4px;
+        }
+        .listening-status h3 {
+            margin: 0 0 10px 0;
+            color: #1976d2;
+        }
+        .listen-btn {
+            background-color: #4caf50;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        .listen-btn:hover {
+            background-color: #45a049;
+        }
+        .stop-btn {
+            background-color: #f44336;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        .stop-btn:hover {
+            background-color: #da190b;
+        }
+        .listening-indicator {
+            background-color: #2196f3;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>SAP Announcements</h1>
+        <div class="refresh-info">Auto-refreshes every 5 seconds | <span id="last-update">Never updated</span></div>
+
+        <div id="listening-status" class="listening-status" style="display: none;">
+            <h3>Currently Listening</h3>
+            <p>Stream: <strong id="current-stream">-</strong></p>
+            <p>Status: <span id="connection-status">-</span></p>
+            <button id="stop-listening-btn" class="stop-btn">Stop Listening</button>
+        </div>
+
+        <div id="error-message" class="error" style="display: none;"></div>
+        <div id="loading" class="loading">Loading...</div>
+        <div id="announcement-content" style="display: none;">
+            <table id="announcement-table">
+                <thead>
+                    <tr>
+                        <th>Status</th>
+                        <th>Stream Name</th>
+                        <th>Source IP</th>
+                        <th>Destination IP</th>
+                        <th>Port</th>
+                        <th>Sample Rate</th>
+                        <th>Actions</th>
+                        <th>Last Seen</th>
+                    </tr>
+                </thead>
+                <tbody id="announcement-tbody">
+                </tbody>
+            </table>
+            <div id="no-data" class="no-data" style="display: none;">
+                No SAP announcements detected yet.
+            </div>
+        </div>
+    </div>
+    <script src="/sap.js"></script>
+</body>
+</html>

@@ -12,8 +12,6 @@
 #define NETWORK_PACKET_RECEIVED_BIT BIT0
 extern EventGroupHandle_t s_network_activity_event_group;
 
-#ifdef IS_USB
 #include "usb/uac_host.h"
 // Global USB speaker device handle
 extern uac_host_device_handle_t s_spk_dev_handle;
-#endif

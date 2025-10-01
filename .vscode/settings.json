@@ -17,9 +17,19 @@
         "algorithm": "c",
         "usb_out.h": "c",
         "task.h": "c",
-        "ntp_client.h": "c"
+        "ntp_client.h": "c",
+        "led_strip.h": "c",
+        "pcm_visualizer.h": "c",
+        "sleep.h": "c",
+        "modes.h": "c",
+        "services.h": "c"
     },
     "chat.agent.enabled": false,
     "chat.commandCenter.enabled": false,
-    "chat.notifyWindowOnConfirmation": false
+    "chat.notifyWindowOnConfirmation": false,
+    "idf.portWin": "COM8",
+    "idf.openOcdConfigs": [
+        "board/esp32s3-bridge.cfg"
+    ],
+    "idf.monitorPort": "COM8"
 }

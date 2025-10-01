@@ -202,6 +202,26 @@ esp_err_t ota_manager_start(uint32_t expected_size, const ota_firmware_info_t *f
     
     ESP_LOGI(TAG, "Starting OTA update, expected size: %u", expected_size);
     
+    // Log partition states for debugging
+    const esp_partition_t *ota0 = esp_partition_find_first(
+        ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_OTA_0, NULL);
+    const esp_partition_t *ota1 = esp_partition_find_first(
+        ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_OTA_1, NULL);
+    
+    if (ota0) {
+        esp_ota_img_states_t state;
+        if (esp_ota_get_state_partition(ota0, &state) == ESP_OK) {
+            ESP_LOGI(TAG, "OTA_0 partition state: %d", state);
+        }
+    }
+    if (ota1) {
+        esp_ota_img_states_t state;
+        if (esp_ota_get_state_partition(ota1, &state) == ESP_OK) {
+            ESP_LOGI(TAG, "OTA_1 partition state: %d", state);
+        }
+    }
+    ESP_LOGI(TAG, "Currently running from: %s", g_ota_ctx->running_partition->label);
+    
     // Update state
     update_state(OTA_STATE_CHECKING);
     

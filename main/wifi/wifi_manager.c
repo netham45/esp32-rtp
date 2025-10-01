@@ -12,9 +12,6 @@
 #include "esp_mac.h"
 #include <string.h>
 #include <inttypes.h>
-#include "mdns/mdns_service.h"
-#include "mdns/mdns_discovery.h"
-#include "mdns.h"
 
 static const char *TAG = "wifi_manager";
 
@@ -58,7 +55,6 @@ static wifi_manager_state_t s_wifi_manager_state = WIFI_MANAGER_STATE_NOT_INITIA
 
 // Flag to indicate we're in scan mode - used to prevent connection attempts
 static bool s_in_scan_mode = false;
-static bool s_mdns_initialized = false;
 // Flag to indicate initialization is complete - prevents race conditions in ESP-IDF 5.5
 static bool s_initialization_complete = false;
 
@@ -135,14 +131,6 @@ esp_err_t wifi_manager_init(void) {
     // Set WiFi mode to APSTA (both AP and STA can be active)
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
     
-    // Start mDNS service - this should work in all modes (AP/STA/APSTA)
-    // mDNS needs to be available regardless of connection state
-    if (!s_mdns_initialized) {
-        ESP_LOGI(TAG, "Starting mDNS service");
-        mdns_service_start();
-        s_mdns_initialized = true;
-    }
-    
     // Update state
     s_wifi_manager_state = WIFI_MANAGER_STATE_CONNECTING;
     
@@ -158,18 +146,17 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
     static int s_retry_num = 0;
     
     if (event_base == WIFI_EVENT) {
-        // The new Espressif mDNS component handles events automatically
+        // Network events are handled by lifecycle_manager
         // No need to manually forward events
         
         if (event_id == WIFI_EVENT_STA_START) {
             // WiFi station started, attempt to connect, but only if not in scan mode and initialization is complete
-            // This prevents race conditions in ESP-IDF 5.5 where we try to set config while connecting
             if (!s_in_scan_mode && s_initialization_complete) {
                 ESP_LOGI(TAG, "STA started, connecting to AP");
                 esp_wifi_connect();
             } else {
-                ESP_LOGD(TAG, "STA started, but not connecting yet (scan_mode=%d, init_complete=%d)",
-                         s_in_scan_mode, s_initialization_complete);
+                ESP_LOGD(TAG, "STA started, but not connecting yet (scan_mode=%d, init_complete=%d, state=%d)",
+                         s_in_scan_mode, s_initialization_complete, s_wifi_manager_state);
             }
         } else if (event_id == WIFI_EVENT_STA_DISCONNECTED) {
             wifi_event_sta_disconnected_t *disconn = event_data;
@@ -221,19 +208,8 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
             s_wifi_manager_state = WIFI_MANAGER_STATE_CONNECTED;
             lifecycle_manager_post_event(LIFECYCLE_EVENT_WIFI_CONNECTED);
 
-            // CRITICAL: Restart mDNS service after getting IP
-            // This ensures mDNS is properly bound to the new network interface
-            if (s_mdns_initialized) {
-                ESP_LOGI(TAG, "Restarting mDNS service after getting IP");
-                mdns_service_stop();
-                vTaskDelay(pdMS_TO_TICKS(100)); // Small delay
-                mdns_service_start();
-                
-                // Enable advertisement immediately
-                ESP_LOGI(TAG, "Enabling mDNS advertisement");
-                mdns_discovery_enable_advertisement(true);
-            }
-            
+            // mDNS restart is handled by lifecycle_manager when network changes
+
             // If configured to hide AP when connected, disable AP interface
             if (lifecycle_get_hide_ap_when_connected()) {
                 ESP_LOGI(TAG, "Disabling AP interface when connected (as configured)");
@@ -397,8 +373,32 @@ static esp_err_t start_ap_mode(void) {
         ESP_LOGW(TAG, "WiFi stop returned: %s", esp_err_to_name(stop_ret));
     }
     
-    // Use APSTA mode instead of AP mode only to allow future STA connections
-    // without disabling the AP
+    // Configure DHCP server to advertise itself (192.168.4.1) as the DNS server for captive portal
+    if (s_ap_netif) {
+        esp_netif_dns_info_t dns_info;
+        dns_info.ip.u_addr.ip4.addr = ESP_IP4TOADDR(192, 168, 4, 1);
+        dns_info.ip.type = ESP_IPADDR_TYPE_V4;
+        
+        esp_err_t ret = esp_netif_dhcps_stop(s_ap_netif);
+        if (ret != ESP_OK && ret != ESP_ERR_ESP_NETIF_DHCP_ALREADY_STOPPED) {
+            ESP_LOGW(TAG, "Failed to stop DHCP server: %s", esp_err_to_name(ret));
+        }
+        
+        ret = esp_netif_set_dns_info(s_ap_netif, ESP_NETIF_DNS_MAIN, &dns_info);
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to set DNS server info: %s", esp_err_to_name(ret));
+        } else {
+            ESP_LOGI(TAG, "Configured DHCP to advertise 192.168.4.1 as DNS server for captive portal");
+        }
+        
+        ret = esp_netif_dhcps_start(s_ap_netif);
+        if (ret != ESP_OK && ret != ESP_ERR_ESP_NETIF_DHCP_ALREADY_STARTED) {
+            ESP_LOGW(TAG, "Failed to start DHCP server: %s", esp_err_to_name(ret));
+        }
+    }
+    
+    // Use APSTA mode (both interfaces were created in init)
+    // The STA won't connect because we set the state to AP_MODE
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_ap_config));
     ESP_ERROR_CHECK(esp_wifi_start());
@@ -946,16 +946,17 @@ esp_err_t wifi_manager_connect_to_strongest(void) {
     
     // Set APSTA mode
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
-    
+
+    // Set flags BEFORE starting WiFi to prevent premature connection attempts
+    s_initialization_complete = true;
+    s_in_scan_mode = true;  // Block event handler from connecting until we're ready
+
     // Start WiFi
     esp_err_t err = esp_wifi_start();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to start WiFi: %s", esp_err_to_name(err));
         return err;
     }
-    
-    // Ensure initialization flag is set for scanning
-    s_initialization_complete = true;
     
     // Clear the status bits
     xEventGroupClearBits(s_wifi_event_group, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT);
@@ -1089,17 +1090,22 @@ esp_err_t wifi_manager_connect_to_strongest(void) {
     strncpy((char*)wifi_sta_config.sta.ssid, networks[selected_index].ssid, sizeof(wifi_sta_config.sta.ssid));
     strncpy((char*)wifi_sta_config.sta.password, stored_password, sizeof(wifi_sta_config.sta.password));
     
-    // Update WiFi configuration
+    // Update WiFi configuration (can be done while WiFi is running)
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_sta_config));
-    
-    // Ensure initialization flag is set
-    s_initialization_complete = true;
-    
-    // Connect to the network
-    ESP_ERROR_CHECK(esp_wifi_connect());
-    
+
     // Update state
     s_wifi_manager_state = WIFI_MANAGER_STATE_CONNECTING;
+
+    // Prevent event handler from calling esp_wifi_connect() while we do it manually
+    s_initialization_complete = false;
+    s_in_scan_mode = false;
+
+    // Disconnect first if already connected, then connect to new network
+    esp_wifi_disconnect();
+    ESP_ERROR_CHECK(esp_wifi_connect());
+
+    // Re-enable event handler for handling disconnections/reconnections
+    s_initialization_complete = true;
     
     // Wait for connection with timeout
     EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group,

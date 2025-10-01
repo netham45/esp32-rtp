@@ -66,6 +66,9 @@ typedef struct {
     
     // Setup wizard status
     bool setup_wizard_completed;           // Whether the setup wizard has been completed
+
+    // SAP configuration
+    char sap_stream_name[64];              // Name of SAP stream to automatically connect to
 } app_config_t;
 
 // Initialize configuration (load from NVS or use defaults)

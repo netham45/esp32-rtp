@@ -144,7 +144,7 @@ static uint8_t pulse_lut[256];
                     else                                                             \
                     {                                                                \
                         int16_t stereo[2] = {left_sample, s16};                      \
-                        xRingbufferSend(pcm_buffer, stereo, sizeof(stereo), 0);      \
+                        xRingbufferSend(pcm_buffer, stereo, sizeof(stereo), 10000);  \
                     }                                                                \
                 }                                                                    \
             }                                                                        \
@@ -209,8 +209,8 @@ static void spdif_decoder_task(void *arg)
     ESP_LOGI("TAG", "PCM buffer found, continuing");
     while (1)
     {
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-        symbols = (rmt_symbol_word_t *)xRingbufferReceive(g_symbol_buffer, &rx_size, 0);
+        //ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        symbols = (rmt_symbol_word_t *)xRingbufferReceive(g_symbol_buffer, &rx_size, portMAX_DELAY);
         while (symbols)
         {
             size_t num_symbols = rx_size / sizeof(rmt_symbol_word_t);
@@ -282,7 +282,7 @@ esp_err_t spdif_receiver_init(int input_pin, void (*init_done_cb)(void))
 {
     ESP_LOGI("TAG", "SPDIF Init Called");
 
-    g_symbol_buffer = xRingbufferCreate(SYMBOL_BUFFER_SIZE, RINGBUF_TYPE_BYTEBUF);
+    g_symbol_buffer = xRingbufferCreate(SYMBOL_BUFFER_SIZE * sizeof(rmt_symbol_word_t), RINGBUF_TYPE_BYTEBUF);
     if (!g_symbol_buffer)
     {
         return ESP_FAIL;

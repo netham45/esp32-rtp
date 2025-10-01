@@ -7,13 +7,13 @@
 #define FIRMWARE_VERSION_PATCH  1
 
 // Build number (can be auto-incremented by build system)
-#define FIRMWARE_BUILD_NUMBER   2
+#define FIRMWARE_BUILD_NUMBER   3
 
 // Version string format: "major.minor.patch-build"
-#define FIRMWARE_VERSION_STRING "1.0.1-2"
+#define FIRMWARE_VERSION_STRING "1.0.1-3"
 
 // Full version string with additional info
-#define FIRMWARE_VERSION_FULL   "ESP32 Scream Receiver v1.0.1-2"
+#define FIRMWARE_VERSION_FULL   "ESP32 Scream Receiver v1.0.1-3"
 
 // Application name
 #define FIRMWARE_APP_NAME       "esp32-scream-receiver"
@@ -68,9 +68,10 @@
 #define OTA_MIN_VERSION_MAJOR   1
 #define OTA_MIN_VERSION_MINOR   0
 #define OTA_MIN_VERSION_PATCH   0
-
-// Maximum firmware size (4MB - 512KB for NVS, bootloader, etc.)
-#define OTA_MAX_FIRMWARE_SIZE   (3584 * 1024)  // 3.5MB
+      
+// Maximum firmware size must match OTA partition size from partitions.csv
+// Each OTA partition is 1856KB (ota_0 and ota_1)
+#define OTA_MAX_FIRMWARE_SIZE   (1856 * 1024)  // 1.856MB (1,900,544 bytes)
 
 // OTA partition label
 #define OTA_PARTITION_LABEL     "ota"
