@@ -8,7 +8,7 @@
 #include "../mdns/mdns_service.h"
 #include "../ntp/ntp_client.h"
 #ifdef IS_SPDIF
-#include "../sender/spdif_in/spdif_in.h"
+#include "spdif_in.h"
 #endif
 #include "esp_log.h"
 

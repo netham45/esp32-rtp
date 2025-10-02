@@ -24,7 +24,7 @@ extern "C" {
 #define PCM_BUFFER_SIZE         8192        // 8KB PCM ring buffer
 
 // External PCM buffer shared with network_out
-extern RingbufHandle_t pcm_buffer;
+static RingbufHandle_t usb_in_pcm_buffer = NULL;
 
 // Public API functions
 esp_err_t usb_in_init(void (*init_done_cb)(void));
@@ -36,20 +36,25 @@ bool usb_in_is_connected(void);
 
 inline int usb_in_read(uint8_t *buffer, size_t size)
 {
-    if (!pcm_buffer)
+    if (!usb_in_pcm_buffer)
     {
         return 0;
     }
     size_t received_size = 0;
     uint8_t *data = (uint8_t *)xRingbufferReceiveUpTo(
-        pcm_buffer, &received_size, pdMS_TO_TICKS(10), size);
+        usb_in_pcm_buffer, &received_size, pdMS_TO_TICKS(10), size);
     if (data && received_size > 0)
     {
         memcpy(buffer, data, received_size);
-        vRingbufferReturnItem(pcm_buffer, (void *)data);
+        vRingbufferReturnItem(usb_in_pcm_buffer, (void *)data);
         return received_size;
     }
     return 0;
+}
+
+static inline RingbufHandle_t usb_in_get_ringbuf()
+{
+    return usb_in_pcm_buffer;
 }
 
 #ifdef __cplusplus

@@ -24,7 +24,8 @@
         "modes.h": "c",
         "services.h": "c",
         "spdif_in.h": "c",
-        "spdif_out.h": "c"
+        "spdif_out.h": "c",
+        "string.h": "c"
     },
     "chat.agent.enabled": false,
     "chat.commandCenter.enabled": false,

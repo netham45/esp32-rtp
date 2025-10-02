@@ -27,23 +27,20 @@ static struct {
     uint32_t buffer_underruns;
 } g_usb_state = {0};
 
-// Global PCM buffer shared with network_out
-extern RingbufHandle_t pcm_buffer;
-
 // UAC Callback Functions
 // Called when host sends audio to device (speaker output)
 // This RECEIVES audio FROM host and writes TO our PCM buffer
 static esp_err_t usb_audio_output_callback(uint8_t *buf, size_t len, void *ctx)
 {
     // Check if we're running
-    if (!g_usb_state.running || !pcm_buffer) {
+    if (!g_usb_state.running || !usb_in_pcm_buffer) {
         // Discard audio if not running
         return ESP_OK;
     }
     
     
     // Write the received audio data to PCM ring buffer
-    BaseType_t result = xRingbufferSend(pcm_buffer, buf, len, 0);
+    BaseType_t result = xRingbufferSend(usb_in_pcm_buffer, buf, len, 0);
     
     if (result == pdTRUE) {
         g_usb_state.packets_sent++;  // Actually packets received from host
@@ -114,6 +111,12 @@ esp_err_t usb_in_init(void (*init_done_cb)(void))
         ESP_LOGW(TAG, "USB input already initialized");
         return ESP_OK;
     }
+
+    usb_in_pcm_buffer = xRingbufferCreate(PCM_BUFFER_SIZE, RINGBUF_TYPE_BYTEBUF);
+    if (!usb_in_pcm_buffer)
+    {
+        return ESP_FAIL;
+    }
     
     ESP_LOGI(TAG, "Initializing USB audio input (USB speaker device)");
     
@@ -179,9 +182,9 @@ void usb_in_deinit(void)
     
     
     // Delete PCM buffer
-    if (pcm_buffer) {
-        vRingbufferDelete(pcm_buffer);
-        pcm_buffer = NULL;
+    if (usb_in_pcm_buffer) {
+        vRingbufferDelete(usb_in_pcm_buffer);
+        usb_in_pcm_buffer = NULL;
         ESP_LOGI(TAG, "PCM buffer deleted");
     }
     

@@ -14,13 +14,8 @@
 #include "esp_wifi.h"
 #include <string.h>
 
-#ifdef IS_SPDIF
-#include "../sender/spdif_in/spdif_in.h"
-#include "../receiver/spdif_out.h"
-#endif
 
 // Forward declarations for reconfiguration functions
-static esp_err_t spdif_pin_reconfigure(uint8_t new_pin);
 static esp_err_t buffer_size_reconfigure(void);
 
 // External functions from audio_out.c for playback control
@@ -506,35 +501,15 @@ esp_err_t lifecycle_set_spdif_data_pin(uint8_t pin) {
         ESP_LOGE(TAG, "Invalid SPDIF data pin: %d", pin);
         return ESP_ERR_INVALID_ARG;
     }
-    
+
     app_config_t *config = config_manager_get_config();
     if (config->spdif_data_pin != pin) {
         ESP_LOGI(TAG, "Setting SPDIF data pin to %d", pin);
-        uint8_t old_pin = config->spdif_data_pin;
         config->spdif_data_pin = pin;
         esp_err_t ret = config_manager_save_setting("spdif_data_pin", &pin, sizeof(pin));
         if (ret == ESP_OK) {
-            // Check if we're currently in a SPDIF mode
-            lifecycle_state_t state = lifecycle_get_current_state();
-            if (state == LIFECYCLE_STATE_MODE_RECEIVER_SPDIF ||
-                state == LIFECYCLE_STATE_MODE_SENDER_SPDIF) {
-                ESP_LOGI(TAG, "SPDIF mode active, applying pin change immediately");
-                
-                // Try to reconfigure without restart
-                ret = spdif_pin_reconfigure(pin);
-                if (ret == ESP_OK) {
-                    ESP_LOGI(TAG, "SPDIF pin changed from %d to %d successfully without restart", old_pin, pin);
-                    // No need to post configuration changed event as we handled it
-                } else {
-                    ESP_LOGW(TAG, "Immediate pin reconfiguration failed, will require restart");
-                    // Post event for restart
-                    lifecycle_manager_post_event(LIFECYCLE_EVENT_CONFIGURATION_CHANGED);
-                }
-            } else {
-                // Not in SPDIF mode, just post the event for future use
-                ESP_LOGI(TAG, "SPDIF pin configuration saved, will be used on next SPDIF mode activation");
-                lifecycle_manager_post_event(LIFECYCLE_EVENT_CONFIGURATION_CHANGED);
-            }
+            // Notify lifecycle manager; actual application occurs elsewhere
+            lifecycle_manager_post_event(LIFECYCLE_EVENT_CONFIGURATION_CHANGED);
         }
         return ret;
     }
@@ -881,49 +856,6 @@ esp_err_t lifecycle_save_config(void) {
 // RECONFIGURATION HELPER FUNCTIONS (STATIC/INTERNAL)
 // ============================================================================
 
-/**
- * Reconfigure SPDIF pin for active SPDIF modes without restart
- */
-static esp_err_t spdif_pin_reconfigure(uint8_t new_pin) {
-    ESP_LOGI(TAG, "Reconfiguring SPDIF data pin to GPIO %d", new_pin);
-    
-    lifecycle_state_t state = lifecycle_get_current_state();
-    
-    if (state != LIFECYCLE_STATE_MODE_RECEIVER_SPDIF &&
-        state != LIFECYCLE_STATE_MODE_SENDER_SPDIF) {
-        return ESP_ERR_INVALID_STATE;
-    }
-    
-    esp_err_t ret = ESP_OK;
-    
-    #ifdef IS_SPDIF
-    if (state == LIFECYCLE_STATE_MODE_RECEIVER_SPDIF) {
-        stop_playback();
-        vTaskDelay(pdMS_TO_TICKS(100));
-        
-        ret = spdif_init(lifecycle_get_sample_rate());
-        if (ret == ESP_OK) {
-            app_config_t *config = config_manager_get_config();
-            ret = spdif_set_sample_rates((int)config->sample_rate);
-        }
-        
-        resume_playback();
-    } else if (state == LIFECYCLE_STATE_MODE_SENDER_SPDIF) {
-        spdif_receiver_stop();
-        spdif_receiver_deinit();
-        vTaskDelay(pdMS_TO_TICKS(100));
-        
-        ret = spdif_receiver_init(new_pin, NULL);
-        if (ret == ESP_OK) {
-            ret = spdif_receiver_start();
-        }
-    }
-    #else
-    ret = ESP_ERR_NOT_SUPPORTED;
-    #endif
-    
-    return ret;
-}
 
 /**
  * Reconfigure buffer sizes for active receiver modes without restart
@@ -1032,16 +964,8 @@ bool lifecycle_config_handle_configuration_changed(void) {
     if (current_config->spdif_data_pin != previous_config.spdif_data_pin) {
         ESP_LOGI(TAG, "SPDIF pin changed from %d to %d", previous_config.spdif_data_pin, current_config->spdif_data_pin);
         any_changes = true;
-
-        if (state == LIFECYCLE_STATE_MODE_RECEIVER_SPDIF ||
-            state == LIFECYCLE_STATE_MODE_SENDER_SPDIF) {
-            ESP_LOGI(TAG, "Reconfiguring SPDIF pin immediately");
-            esp_err_t ret = spdif_pin_reconfigure(current_config->spdif_data_pin);
-            if (ret != ESP_OK) {
-                ESP_LOGW(TAG, "SPDIF pin reconfiguration failed, restart required");
-                restart_required = true;
-            }
-        }
+        // No immediate reconfiguration in config.c; require restart to apply
+        restart_required = true;
     }
 
     // Volume changes

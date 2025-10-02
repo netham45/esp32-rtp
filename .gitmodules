@@ -4,3 +4,6 @@
 [submodule "components/espressif__usb_host_uac"]
 	path = components/espressif__usb_host_uac
 	url = https://github.com/netham45/esp32s3_usb_host_uac_apple
+[submodule "components/netham45__spdif_in"]
+	path = components/netham45__spdif_in
+	url = https://github.com/netham45/esp32-spdif

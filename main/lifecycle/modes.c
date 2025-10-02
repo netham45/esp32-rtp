@@ -16,7 +16,7 @@
 #endif
 
 #ifdef IS_SPDIF
-#include "../sender/spdif_in/spdif_in.h"
+#include "spdif_in.h"
 #include "../receiver/spdif_out.h"
 #endif
 

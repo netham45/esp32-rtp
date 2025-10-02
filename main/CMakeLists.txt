@@ -59,8 +59,6 @@ set(LIFECYCLE_SRCS
 )
 
 set(SENDER_SRCS
-    "sender/spdif_in/histogram.c"
-    "sender/spdif_in/spdif_in.c"
     "sender/usb_in.c"
 )
 

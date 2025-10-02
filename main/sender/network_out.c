@@ -20,7 +20,7 @@
 #include "rom/ets_sys.h"
 #include "esp_netif.h"    // For IP address functions
 #include "esp_timer.h"    // For timestamp generation
-#include "spdif_in/spdif_in.h"
+#include "spdif_in.h"
 #include "usb_in.h"
 #include "config/config_manager.h"  // For device_mode_t enum
 #include "visualizer/pcm_visualizer.h"  // For pcm_viz_write
@@ -33,6 +33,7 @@ typedef struct __attribute__((packed)) {
     uint32_t timestamp;  // RTP timestamp
     uint32_t ssrc;       // Synchronization source identifier
 } rtp_header_t;
+
 
 // Compile-time assertion to ensure RTP header is exactly 12 bytes
 _Static_assert(sizeof(rtp_header_t) == 12, "RTP header must be exactly 12 bytes");
@@ -57,7 +58,7 @@ typedef struct __attribute__((packed)) {
 #define SAP_ANNOUNCE_INTERVAL_MS 30000  // 30 seconds
 #define SAP_VERSION          1
 
-RingbufHandle_t pcm_buffer = NULL;
+
 // Scream header for 16-bit 48KHz stereo audio
 // static const char header[] = {1, 16, 2, 0, 0};  // Commented out - using RTP header instead
 #define HEADER_SIZE RTP_HEADER_SIZE
@@ -279,12 +280,6 @@ esp_err_t rtp_sender_init(void)
     }
     
     ESP_LOGI(TAG, "Initializing RTP sender");
-
-    pcm_buffer = xRingbufferCreate(PCM_BUFFER_SIZE, RINGBUF_TYPE_BYTEBUF);
-    if (!pcm_buffer)
-    {
-        return ESP_FAIL;
-    }
     
     // Generate random RTP state - SSRC stays constant for the session
     s_rtp_ssrc = esp_random();
@@ -587,6 +582,8 @@ static void rtp_sender_task(void *arg)
     // 1152 bytes per chunk / (48000 samples/sec * 2 channels * 2 bytes/sample) = 6ms per chunk
     const TickType_t xFrequency = pdMS_TO_TICKS(3);
     xLastWakeTime = xTaskGetTickCount();
+
+    RingbufHandle_t pcm_out_buffer = NULL;
     
     while (s_is_sender_running) {
         if (s_is_muted) {
@@ -604,15 +601,22 @@ static void rtp_sender_task(void *arg)
             device_mode_t current_mode = lifecycle_get_device_mode();
             
             // Both USB and SPDIF sender modes use the same ring buffer approach
-            if (!pcm_buffer) {
-                vTaskDelay(0);
+            if (!pcm_out_buffer) {
+
+                if (current_mode == MODE_SENDER_SPDIF) {
+                    while (spdif_in_get_ringbuf() == NULL) vTaskDelay(0);
+                    pcm_out_buffer = spdif_in_get_ringbuf();
+                } else  if (current_mode == MODE_SENDER_USB){
+                    while (usb_in_get_ringbuf() == NULL) vTaskDelay(0);
+                    pcm_out_buffer = usb_in_get_ringbuf();
+                }
                 continue;
             }
             
             size_t item_size;
             // Try to receive up to bytes_to_read from the ring buffer
             uint8_t *item = (uint8_t *)xRingbufferReceiveUpTo(
-                pcm_buffer,  // Ring buffer populated by either usb_in or spdif_in
+                pcm_out_buffer,  // Ring buffer populated by either usb_in or spdif_in
                 &item_size,
                 pdMS_TO_TICKS(1),
                 bytes_to_read
@@ -620,7 +624,7 @@ static void rtp_sender_task(void *arg)
             if (item != NULL) {
                 memcpy((uint8_t*)audio_buffer + bytes_in_buffer, item, item_size);
                 bytes_read = item_size;
-                vRingbufferReturnItem(pcm_buffer, (void *)item);
+                vRingbufferReturnItem(pcm_out_buffer, (void *)item);
             } else {
                 bytes_read = 0;
             }
