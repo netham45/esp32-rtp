@@ -3,15 +3,16 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "esp_err.h"
+#include "build_config.h"
 
-// Configuration constants
-#define PCM_VIZ_CHUNK_SIZE      1152    // Match PCM chunk size
-#define PCM_VIZ_RING_SIZE       (PCM_VIZ_CHUNK_SIZE * 4)  // Ring buffer size
-#define PCM_VIZ_WINDOW_SIZE     1024    // Sample window for RMS calculation (21.3ms at 48kHz)
+// Configuration constants (sourced from Kconfig via build_config.h)
+#define PCM_VIZ_CHUNK_SIZE      CONFIG_VIZ_CHUNK_SIZE
+#define PCM_VIZ_RING_SIZE       CONFIG_VIZ_RING_SIZE
+#define PCM_VIZ_WINDOW_SIZE     CONFIG_VIZ_WINDOW_SIZE    // Sample window for RMS calculation (21.3ms at 48kHz)
 
-// VU Meter Ballistics
-#define PCM_VIZ_ATTACK_COEFF  0.2f   // Fast attack (~50ms)
-#define PCM_VIZ_RELEASE_COEFF 0.03f  // Slow release (~300ms)
+// VU Meter Ballistics (fixed-point -> float)
+#define PCM_VIZ_ATTACK_COEFF  (CONFIG_VIZ_ATTACK_COEFF_MPCT / 1000.0f)   // Fast attack (~50ms)
+#define PCM_VIZ_RELEASE_COEFF (CONFIG_VIZ_RELEASE_COEFF_MPCT / 1000.0f)  // Slow release (~300ms)
 
 // dB Range Configuration (for PPM scale)
 #define PCM_VIZ_MIN_DB PCM_VIZ_PPM_MIN_DB
@@ -19,26 +20,26 @@
 #define PCM_VIZ_DB_RANGE PCM_VIZ_PPM_DB_RANGE
 
 // Peak Hold Configuration
-#define PCM_VIZ_PEAK_HOLD_MS 1500    // 1.5 seconds
+#define PCM_VIZ_PEAK_HOLD_MS CONFIG_VIZ_PEAK_HOLD_MS    // 1.5 seconds
 #define PCM_VIZ_PEAK_DECAY_DB_PER_SEC 20.0f
 
-// Auto-Gain Configuration
-#define PCM_VIZ_AUTO_GAIN_MIN 0.5f
-#define PCM_VIZ_AUTO_GAIN_MAX 4.0f
-#define PCM_VIZ_AUTO_GAIN_TARGET 0.8f    // Target peak at 80% (26/32 LEDs)
-#define PCM_VIZ_AUTO_GAIN_ADJUST_RATE 0.05f  // ±5% per second max
-#define PCM_VIZ_AUTO_GAIN_WINDOW_MS 1000     // 1-second window
+// Auto-Gain Configuration (fixed-point -> float)
+#define PCM_VIZ_AUTO_GAIN_MIN (CONFIG_VIZ_AUTO_GAIN_MIN_MPCT / 1000.0f)
+#define PCM_VIZ_AUTO_GAIN_MAX (CONFIG_VIZ_AUTO_GAIN_MAX_MPCT / 1000.0f)
+#define PCM_VIZ_AUTO_GAIN_TARGET (CONFIG_VIZ_AUTO_GAIN_TARGET_MPCT / 1000.0f)    // Target peak at 80% (26/32 LEDs)
+#define PCM_VIZ_AUTO_GAIN_ADJUST_RATE (CONFIG_VIZ_AUTO_GAIN_ADJUST_RATE_MPCT / 1000.0f)  // ±5% per second max
+#define PCM_VIZ_AUTO_GAIN_WINDOW_MS CONFIG_VIZ_AUTO_GAIN_WINDOW_MS     // 1-second window
 
 // PPM Meter Configuration (IEC 60268-10 Type I style)
 #define PCM_VIZ_PPM_INTEGRATION_MS 10        // 10ms quasi-peak integration
-#define PCM_VIZ_PPM_DECAY_DB_PER_SEC 25.0f 
-#define PCM_VIZ_PPM_MIN_DB -40.0f            // Scale minimum (was -60)
-#define PCM_VIZ_PPM_MAX_DB 0.0f              // Scale maximum (was +6, now 0dB = full scale)
-#define PCM_VIZ_PPM_DB_RANGE 40.0f           // Total scale range (was 66)
-#define PCM_VIZ_PPM_OVERLOAD_DB -3.0f        // Overload warning threshold (3dB before clipping)
+#define PCM_VIZ_PPM_DECAY_DB_PER_SEC (CONFIG_VIZ_PPM_DECAY_DB_PER_SEC_TENTHS / 10.0f)
+#define PCM_VIZ_PPM_MIN_DB (CONFIG_VIZ_PPM_MIN_DB_TENTHS / 10.0f)            // Scale minimum
+#define PCM_VIZ_PPM_MAX_DB (CONFIG_VIZ_PPM_MAX_DB_TENTHS / 10.0f)            // Scale maximum
+#define PCM_VIZ_PPM_DB_RANGE (CONFIG_VIZ_PPM_DB_RANGE_TENTHS / 10.0f)        // Total scale range
+#define PCM_VIZ_PPM_OVERLOAD_DB (CONFIG_VIZ_PPM_OVERLOAD_DB_TENTHS / 10.0f)  // Overload warning threshold
 
 // Smoothing (reduced from 0.7)
-#define PCM_VIZ_SMOOTH_COEFF 0.3f
+#define PCM_VIZ_SMOOTH_COEFF (CONFIG_VIZ_SMOOTH_COEFF_MPCT / 1000.0f)
 
 // PPM Loudness Analysis
 typedef struct {

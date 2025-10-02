@@ -8,8 +8,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
+#include "freertos/timers.h"
 #include "lifecycle_manager.h"
-#include "esp_mac.h"
 #include <string.h>
 #include <inttypes.h>
 
@@ -58,8 +58,15 @@ static bool s_in_scan_mode = false;
 // Flag to indicate initialization is complete - prevents race conditions in ESP-IDF 5.5
 static bool s_initialization_complete = false;
 
+// Reconnect backoff timer - schedules STA reconnects without blocking the event loop
+static TimerHandle_t s_reconnect_timer = NULL;
+// Global retry counter used for exponential backoff
+static int s_retry_num = 0;
+// Timer callback forward declaration
+static void wifi_reconnect_timer_cb(TimerHandle_t xTimer);
+
 // Forward declarations for internal functions
-static void wifi_event_handler(void *arg, esp_event_base_t event_base, 
+static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                               int32_t event_id, void *event_data);
 static esp_err_t start_ap_mode(void);
 
@@ -89,6 +96,13 @@ esp_err_t wifi_manager_init(void) {
     
     // Create the event group for WiFi events
     s_wifi_event_group = xEventGroupCreate();
+
+    // Create reconnect timer used to schedule STA reconnect attempts
+    s_reconnect_timer = xTimerCreate("wifi_reconnect", pdMS_TO_TICKS(1000), pdFALSE, NULL, wifi_reconnect_timer_cb);
+    if (s_reconnect_timer == NULL) {
+        ESP_LOGE(TAG, "Failed to create WiFi reconnect timer");
+        // Continue without timer; reconnect attempts will be skipped if timer is unavailable
+    }
     
     // Initialize the TCP/IP stack (safely - it might be initialized already)
     esp_err_t net_err = esp_netif_init();
@@ -143,8 +157,6 @@ esp_err_t wifi_manager_init(void) {
 static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                               int32_t event_id, void *event_data) {
     
-    static int s_retry_num = 0;
-    
     if (event_base == WIFI_EVENT) {
         // Network events are handled by lifecycle_manager
         // No need to manually forward events
@@ -168,10 +180,8 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                 esp_wifi_set_mode(WIFI_MODE_APSTA);
             }
             
-            // Implement indefinite retries with backoff
+            // Increment retry count and compute backoff delay (exponential, capped)
             s_retry_num++;
-            
-            // Calculate backoff delay (exponential with cap)
             int delay_ms = 1000; // Base delay of 1 second
             if (s_retry_num > 1) {
                 // Exponential backoff with a maximum of 30 seconds
@@ -180,13 +190,19 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                     delay_ms = 30000;
                 }
             }
-            
-            ESP_LOGI(TAG, "Connection attempt %d failed, reason: %" PRIu16 ", retrying in %d ms", 
+
+            // Signal failure so any waiters can proceed
+            xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
+
+            ESP_LOGI(TAG, "Connection attempt %d failed, reason: %" PRIu16 ", scheduling reconnect in %d ms",
                     s_retry_num, disconn->reason, delay_ms);
-            
-            // Wait before reconnecting
-            vTaskDelay(pdMS_TO_TICKS(delay_ms));
-            esp_wifi_connect();
+
+            // Schedule reconnect via timer to avoid blocking the event loop
+            if (s_reconnect_timer) {
+                xTimerStop(s_reconnect_timer, 0);
+                xTimerChangePeriod(s_reconnect_timer, pdMS_TO_TICKS(delay_ms), 0);
+                xTimerStart(s_reconnect_timer, 0);
+            }
         } else if (event_id == WIFI_EVENT_AP_STACONNECTED) {
             wifi_event_ap_staconnected_t *event = (wifi_event_ap_staconnected_t*) event_data;
             ESP_LOGI(TAG, "Station connected to AP, MAC: %02x:%02x:%02x:%02x:%02x:%02x",
@@ -217,6 +233,22 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
             }
         }
     }
+}
+
+// One-shot reconnect timer callback: attempts a safe STA reconnect without blocking the event loop
+static void wifi_reconnect_timer_cb(TimerHandle_t xTimer) {
+    // Only attempt reconnect when appropriate
+    if (s_in_scan_mode || !s_initialization_complete) {
+        ESP_LOGD(TAG, "Reconnect timer fired but conditions not met (scan_mode=%d, init_complete=%d)",
+                 s_in_scan_mode, s_initialization_complete);
+        return;
+    }
+    if (!wifi_manager_has_credentials()) {
+        ESP_LOGW(TAG, "Reconnect skipped: no stored credentials");
+        return;
+    }
+    ESP_LOGI(TAG, "Attempting STA reconnect");
+    esp_wifi_connect();
 }
 
 /**
@@ -300,6 +332,9 @@ esp_err_t wifi_manager_start(void) {
         s_initialization_complete = true;
         ESP_LOGI(TAG, "WiFi started, manually triggering connection");
         esp_wifi_connect();
+
+        // Clear status bits before waiting
+        xEventGroupClearBits(s_wifi_event_group, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT);
         
         // Wait for connection with timeout
         EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group,
@@ -338,8 +373,8 @@ esp_err_t wifi_manager_start(void) {
 static esp_err_t start_ap_mode(void) {
     ESP_LOGI(TAG, "Starting AP mode");
     
-    // mDNS is already started in wifi_manager_init(), no need to start again
-    
+    // mDNS is started by lifecycle services; nothing to do here
+     
     // Get AP configuration from lifecycle manager
     const char* ap_ssid = lifecycle_get_ap_ssid();
     const char* ap_password = lifecycle_get_ap_password();
@@ -704,6 +739,11 @@ esp_err_t wifi_manager_stop(void) {
         ESP_LOGE(TAG, "Failed to stop WiFi: %s", esp_err_to_name(ret));
         return ret;
     }
+
+    // Stop pending reconnect timer if any
+    if (s_reconnect_timer) {
+        xTimerStop(s_reconnect_timer, 0);
+    }
     
     // Don't reset to NOT_INITIALIZED - we're just stopping WiFi, not de-initializing everything
     // This prevents wifi_manager_start() from calling wifi_manager_init() again
@@ -780,7 +820,7 @@ esp_err_t wifi_manager_set_band_preference(uint8_t preference) {
 /**
  * Scan for available WiFi networks
  */
-esp_err_t wifi_manager_scan_networks(wifi_network_info_t *networks, size_t max_networks, 
+esp_err_t wifi_manager_scan_networks(wifi_network_info_t *networks, size_t max_networks,
                                     size_t *networks_found) {
     ESP_LOGI(TAG, "Scanning for WiFi networks");
     
@@ -789,9 +829,8 @@ esp_err_t wifi_manager_scan_networks(wifi_network_info_t *networks, size_t max_n
         return ESP_ERR_INVALID_ARG;
     }
     
-    // Initialize to 0 in case we return early
     *networks_found = 0;
-    
+
     // Get current WiFi mode
     wifi_mode_t current_mode;
     esp_err_t ret = esp_wifi_get_mode(&current_mode);
@@ -799,24 +838,26 @@ esp_err_t wifi_manager_scan_networks(wifi_network_info_t *networks, size_t max_n
         ESP_LOGE(TAG, "Failed to get WiFi mode: %s", esp_err_to_name(ret));
         return ret;
     }
-    
-    // Set scanning flag to prevent connection attempts
+
+    // Block connection attempts during scan
     s_in_scan_mode = true;
-    
-    // If we're in AP mode only, we need to switch to APSTA mode temporarily
+
     bool mode_changed = false;
+    wifi_ap_record_t *ap_records = NULL;
+    uint16_t num_ap = 0;
+
+    // If AP-only, switch to APSTA temporarily
     if (current_mode == WIFI_MODE_AP) {
         ESP_LOGI(TAG, "Temporarily switching to APSTA mode for scanning");
         ret = esp_wifi_set_mode(WIFI_MODE_APSTA);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Failed to switch to APSTA mode: %s", esp_err_to_name(ret));
-            s_in_scan_mode = false;
-            return ret;
+            goto cleanup;
         }
         mode_changed = true;
     }
-    
-    // Initialize scan configuration
+
+    // Scan configuration
     wifi_scan_config_t scan_config = {
         .ssid = NULL,
         .bssid = NULL,
@@ -826,79 +867,46 @@ esp_err_t wifi_manager_scan_networks(wifi_network_info_t *networks, size_t max_n
         .scan_time.active.min = 0,
         .scan_time.active.max = 0
     };
-    
-    // Start scan - use normal error handling instead of ESP_ERROR_CHECK
+
+    // Start scan
     ret = esp_wifi_scan_start(&scan_config, true);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to start WiFi scan: %s", esp_err_to_name(ret));
-        
-        // Restore original mode if needed
-        if (mode_changed) {
-            esp_wifi_set_mode(current_mode);
-        }
-        
-        return ret;
+        goto cleanup;
     }
-    
-    // Get scan results - use normal error handling
-    uint16_t num_ap = 0;
+
+    // Get number of APs
     ret = esp_wifi_scan_get_ap_num(&num_ap);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to get AP scan count: %s", esp_err_to_name(ret));
-        
-        // Restore original mode if needed
-        if (mode_changed) {
-            esp_wifi_set_mode(current_mode);
-        }
-        
-        return ret;
+        goto cleanup;
     }
-    
+
     if (num_ap == 0) {
         ESP_LOGI(TAG, "No networks found");
         *networks_found = 0;
-        
-        // Restore original mode if needed
-        if (mode_changed) {
-            esp_wifi_set_mode(current_mode);
-        }
-        
-        return ESP_OK;
+        ret = ESP_OK;
+        goto cleanup;
     }
-    
-    // Limit the number of results to max_networks
+
     if (num_ap > max_networks) {
         num_ap = max_networks;
     }
-    
-    // Allocate memory for scan results
-    wifi_ap_record_t *ap_records = malloc(sizeof(wifi_ap_record_t) * num_ap);
+
+    ap_records = malloc(sizeof(wifi_ap_record_t) * num_ap);
     if (!ap_records) {
         ESP_LOGE(TAG, "Failed to allocate memory for scan results");
-        
-        // Restore original mode if needed
-        if (mode_changed) {
-            esp_wifi_set_mode(current_mode);
-        }
-        
-        return ESP_ERR_NO_MEM;
+        ret = ESP_ERR_NO_MEM;
+        goto cleanup;
     }
-    
-    // Get the actual scan results - use normal error handling
+
     ret = esp_wifi_scan_get_ap_records(&num_ap, ap_records);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to get AP scan records: %s", esp_err_to_name(ret));
-        free(ap_records);
-        
-        // Restore original mode if needed
-        if (mode_changed) {
-            esp_wifi_set_mode(current_mode);
-        }
-        
-        return ret;
+        goto cleanup;
     }
-    
-    // Copy the results to the output array
+
+    // Copy results
     for (int i = 0; i < num_ap; i++) {
         strncpy(networks[i].ssid, (char *)ap_records[i].ssid, WIFI_SSID_MAX_LENGTH);
         networks[i].ssid[WIFI_SSID_MAX_LENGTH] = '\0'; // Ensure null-termination
@@ -906,30 +914,27 @@ esp_err_t wifi_manager_scan_networks(wifi_network_info_t *networks, size_t max_n
         networks[i].authmode = ap_records[i].authmode;
         networks[i].channel = ap_records[i].primary;
         networks[i].band = wifi_manager_get_band_from_channel(ap_records[i].primary);
-        
-        ESP_LOGD(TAG, "Network: %s, Channel: %d, Band: %s, RSSI: %d", 
-                networks[i].ssid, networks[i].channel, 
-                networks[i].band == WIFI_BAND_5GHZ ? "5GHz" : "2.4GHz",
-                networks[i].rssi);
+
+        ESP_LOGD(TAG, "Network: %s, Channel: %d, Band: %s, RSSI: %d",
+                 networks[i].ssid, networks[i].channel,
+                 networks[i].band == WIFI_BAND_5GHZ ? "5GHz" : "2.4GHz",
+                 networks[i].rssi);
     }
-    
-    // Free the allocated memory
-    free(ap_records);
-    
-    // Restore original mode if needed
+
+    *networks_found = num_ap;
+    ret = ESP_OK;
+
+cleanup:
+    if (ap_records) {
+        free(ap_records);
+    }
     if (mode_changed) {
         ESP_LOGI(TAG, "Restoring original WiFi mode after scan");
         esp_wifi_set_mode(current_mode);
     }
-    
-    // Reset the scan mode flag
+    // Always clear scan flag before returning
     s_in_scan_mode = false;
-    
-    // Return the actual number of networks found
-    *networks_found = num_ap;
-    
-    ESP_LOGI(TAG, "Found %" PRIu16 " networks", num_ap);
-    return ESP_OK;
+    return ret;
 }
 
 /**
@@ -974,6 +979,7 @@ esp_err_t wifi_manager_connect_to_strongest(void) {
     
     if (networks_found == 0) {
         ESP_LOGI(TAG, "No networks found");
+        start_ap_mode();
         return ESP_FAIL;
     }
     
@@ -1118,9 +1124,14 @@ esp_err_t wifi_manager_connect_to_strongest(void) {
         ESP_LOGI(TAG, "Connected to network: %s", networks[selected_index].ssid);
         s_wifi_manager_state = WIFI_MANAGER_STATE_CONNECTED;
         return ESP_OK;
-    } else {
+    } else if (bits & WIFI_FAIL_BIT) {
         ESP_LOGI(TAG, "Failed to connect to network: %s", networks[selected_index].ssid);
+        start_ap_mode();
         return ESP_FAIL;
+    } else {
+        ESP_LOGE(TAG, "Connection timeout");
+        start_ap_mode();
+        return ESP_ERR_TIMEOUT;
     }
 }
 

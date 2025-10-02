@@ -1,98 +1,248 @@
-menu "Web Server Configuration"
+menu "ESP32-RTP Configuration"
 
-    config HTTPD_MAX_REQ_HDR_LEN
-        int "Max HTTP Request Header Length"
-        default 2048
-        help
-            This sets the maximum size of HTTP request headers in bytes.
-            Increase this value if you need to handle large headers.
-
-    config HTTPD_MAX_URI_LEN
-        int "Max HTTP URI Length"
-        default 1024
-        help
-            This sets the maximum size of HTTP URIs in bytes.
-            Increase this value if you need to handle long URIs.
-
+menu "Core Audio"
+config PCM_CHUNK_SIZE
+    int "PCM chunk size (bytes)"
+    default 1152
+config SAMPLE_RATE
+    int "Default sample rate (Hz)"
+    default 48000
+config BIT_DEPTH
+    int "Default bit depth"
+    range 8 32
+    default 16
+config DEFAULT_VOLUME_PCT
+    int "Default volume percent (0-100)"
+    range 0 100
+    default 100
 endmenu
 
-menu "USB-C Power Management Configuration"
-
-    config I2C_MASTER_SCL_IO
-        int "I2C Master SCL GPIO"
-        default 22
-        help
-            GPIO number for I2C master SCL.
-
-    config I2C_MASTER_SDA_IO
-        int "I2C Master SDA GPIO"
-        default 8
-        help
-            GPIO number for I2C master SDA.
-            
-    config OTG_PIN
-        int "OTG Control GPIO"
-        default 13
-        help
-            GPIO number for OTG control pin. This pin must be high to activate boost mode.
-
-    config I2C_MASTER_FREQ_HZ
-        int "I2C Master Frequency (Hz)"
-        default 100000
-        help
-            I2C master clock frequency in Hz.
-
-    config POWER_CHIP_ADDR
-        hex "USB-C Power Chip I2C Address"
-        default 0x6B
-        help
-            I2C address of the USB-C power management chip.
-
-    config ENABLE_OTG_BOOST_MODE
-        bool "Enable OTG (Boost) Mode"
-        default y
-        help
-            Enable 5V output on PMID for USB-C port.
-
-    config BOOST_VOLTAGE_VALUE
-        hex "Boost Voltage Register Value"
-        default 0x93
-        help
-            Value for the boost voltage register (REG0A).
-            Default 0x93 sets BOOSTV[3:0] = 1001 for 5.126V output.
-
-    config BOOST_FREQUENCY_VALUE
-        hex "Boost Frequency Register Value"
-        default 0x38
-        help
-            Value for the boost frequency register (REG02).
-            Default 0x38 sets BOOST_FREQ bit (5) for 500kHz frequency.
-
-menu "SPDIF Decoder Configuration"
-
-    config SPDIF_USE_DME_DECODER
-        bool "Use Differential Manchester Decoder"
-        default y
-        help
-            Enable the new Differential Manchester decoder.
-
-    config SPDIF_DEBUG_DURATIONS
-        bool "Enable Duration Debugging"
-        default n
-        help
-            Enable logging of duration statistics.
-
-    config SPDIF_DME_SELFTEST
-        bool "Enable DME Self Test"
-        default n
-        help
-            Enable synthetic pulse injection for DME self-test.
-
-    config SPDIF_DME_DUMP_BYTES
-        bool "Enable DME Byte Dump"
-        default n
-        help
-            Enable dumping of decoder output bytes.
-
+menu "Networking (RTP/SAP)"
+config RTP_PORT
+    int "RTP UDP port"
+    range 1024 65535
+    default 4010
+config SAP_PORT
+    int "SAP port"
+    default 9875
+config SAP_MULTICAST_ADDR
+    string "SAP multicast IPv4 address"
+    default "224.2.127.254"
+config SAP_PULSEAUDIO_ADDR
+    string "PulseAudio SAP IPv4 address"
+    default "224.0.0.56"
+# Optional SAP tunables
+config SAP_MAX_ANNOUNCEMENTS
+    int "SAP max announcements to keep"
+    default 10
+config SAP_ANNOUNCEMENT_TIMEOUT_SEC
+    int "SAP announcement timeout (seconds)"
+    default 120
+config SAP_CLEANUP_INTERVAL_SEC
+    int "SAP cleanup interval (seconds)"
+    default 30
+config SAP_BUFFER_SIZE
+    int "SAP receive buffer size (bytes)"
+    default 1024
 endmenu
+
+menu "Power: BQ25895"
+config BQ25895_I2C_ADDR
+    hex "BQ25895 I2C address"
+    default 0x6A
+config BQ25895_I2C_PORT
+    int "I2C port number"
+    range 0 1
+    default 0
+config BQ25895_SDA_GPIO
+    int "I2C SDA GPIO"
+    default 8
+config BQ25895_SCL_GPIO
+    int "I2C SCL GPIO"
+    default 9
+config BQ25895_I2C_FREQ_HZ
+    int "I2C frequency (Hz)"
+    default 100000
+config BQ25895_OTG_GPIO
+    int "OTG control GPIO"
+    default 13
+config BQ25895_DEFAULT_BOOST_MV
+    int "Default boost voltage (mV)"
+    default 5000
+endmenu
+
+menu "Features"
+config FEATURE_USB
+    bool "Enable USB audio output"
+    default y
+config FEATURE_SPDIF
+    bool "Enable SPDIF sender/receiver"
+    default y
+endmenu
+
+menu "USB Out"
+depends on FEATURE_USB
+config USB_HOST_TASK_PRIO
+    int "USB host task priority"
+    default 5
+config USB_HOST_TASK_STACK
+    int "USB host task stack size"
+    default 4096
+config UAC_TASK_PRIO
+    int "UAC task priority"
+    default 5
+config UAC_TASK_STACK
+    int "UAC task stack size"
+    default 4096
+config USB_ENUMERATION_TIMEOUT_MS
+    int "USB enumeration timeout (ms)"
+    default 5000
+config USB_TRANSFER_RETRY_COUNT
+    int "USB transfer retry count"
+    default 3
+config USB_TRANSFER_RETRY_DELAY_MS
+    int "USB transfer initial retry delay (ms)"
+    default 100
+config USB_RECONNECT_DELAY_MS
+    int "USB reconnect base delay (ms)"
+    default 2000
+config USB_RECONNECT_MAX_ATTEMPTS
+    int "USB reconnect max attempts"
+    default 5
+config USB_INIT_MAX_RETRIES
+    int "USB host init max retries"
+    default 3
+endmenu
+
+menu "SPDIF In"
+depends on FEATURE_SPDIF
+config SPDIF_RMT_RES_HZ
+    int "RMT resolution (Hz)"
+    default 80000000
+config SPDIF_RMT_MEM_BLOCK_SYMBOLS
+    int "RMT mem block symbols"
+    default 8192
+config SPDIF_SYMBOL_BUFFER_SIZE
+    int "Symbol buffer size (bytes)"
+    default 8192
+config SPDIF_PCM_BUFFER_SIZE
+    int "PCM buffer size (bytes)"
+    default 4096
+config SPDIF_DECODER_TASK_STACK
+    int "Decoder task stack (bytes)"
+    default 4096
+config SPDIF_DECODER_TASK_PRIORITY
+    int "Decoder task priority"
+    default 10
+config SPDIF_MIN_SAMPLES_FOR_ANALYSIS
+    int "Min samples before analysis"
+    default 10000
+endmenu
+
+menu "mDNS Discovery"
+config MDNS_QUERY_TIMEOUT_MS
+    int "mDNS query timeout (ms)"
+    default 3000
+config MDNS_MAX_RESULTS
+    int "mDNS max results per query"
+    default 10
+config MDNS_MAX_DEVICES
+    int "Max discovered devices tracked"
+    default 16
+endmenu
+
+menu "NTP / DNS"
+config DNS_MDNS_PORT
+    int "mDNS UDP port"
+    default 5353
+config DNS_MDNS_IPV4_ADDRESS
+    string "mDNS multicast IPv4 address"
+    default "224.0.0.251"
+config NTP_SERVER_PORT
+    int "NTP server port"
+    default 123
+config NTP_QUERY_TARGET
+    string "NTP/DNS query target (hostname)"
+    default "screamrouter.local"
+config NTP_HISTORY_SIZE
+    int "NTP history size"
+    default 25
+config NTP_POLL_INTERVAL_MS
+    int "NTP poll interval (ms)"
+    default 500
+config NTP_FAST_POLL_INTERVAL_MS
+    int "NTP fast poll interval (ms)"
+    default 50
+config NTP_MAX_FAILURE_COUNT
+    int "Max consecutive failures before cache invalidation"
+    default 3
+endmenu
+
+menu "WiFi"
+config WIFI_AP_CHANNEL
+    int "WiFi AP channel"
+    range 1 13
+    default 1
+config WIFI_AP_MAX_CONNECTIONS
+    int "WiFi AP max connections"
+    default 4
+config WIFI_CONNECTION_TIMEOUT_MS
+    int "WiFi connection timeout (ms)"
+    default 10000
+endmenu
+
+menu "Visualizer"
+config VIZ_CHUNK_SIZE
+    int "Visualizer chunk size (bytes)"
+    default 1152
+config VIZ_RING_SIZE
+    int "Visualizer ring size (bytes)"
+    default 4608
+config VIZ_WINDOW_SIZE
+    int "Visualizer RMS window size (samples)"
+    default 1024
+config VIZ_ATTACK_COEFF_MPCT
+    int "Attack coefficient (milli-percent, 1000=1.0)"
+    default 200
+config VIZ_RELEASE_COEFF_MPCT
+    int "Release coefficient (milli-percent, 1000=1.0)"
+    default 30
+config VIZ_PEAK_HOLD_MS
+    int "Peak hold (ms)"
+    default 1500
+config VIZ_PPM_MIN_DB_TENTHS
+    int "PPM min dB (tenths)"
+    default -400
+config VIZ_PPM_MAX_DB_TENTHS
+    int "PPM max dB (tenths)"
+    default 0
+config VIZ_PPM_DB_RANGE_TENTHS
+    int "PPM dB range (tenths)"
+    default 400
+config VIZ_PPM_OVERLOAD_DB_TENTHS
+    int "PPM overload threshold dB (tenths)"
+    default -30
+config VIZ_PPM_DECAY_DB_PER_SEC_TENTHS
+    int "PPM decay dB/s (tenths)"
+    default 250
+config VIZ_SMOOTH_COEFF_MPCT
+    int "Smoothing coefficient (milli-percent, 1000=1.0)"
+    default 300
+config VIZ_AUTO_GAIN_MIN_MPCT
+    int "Auto-gain min (milli-percent)"
+    default 500
+config VIZ_AUTO_GAIN_MAX_MPCT
+    int "Auto-gain max (milli-percent)"
+    default 4000
+config VIZ_AUTO_GAIN_TARGET_MPCT
+    int "Auto-gain target (milli-percent)"
+    default 800
+config VIZ_AUTO_GAIN_ADJUST_RATE_MPCT
+    int "Auto-gain adjust rate per second (milli-percent)"
+    default 50
+config VIZ_AUTO_GAIN_WINDOW_MS
+    int "Auto-gain window (ms)"
+    default 1000
+endmenu
+
 endmenu

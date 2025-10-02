@@ -2,6 +2,7 @@
 #include "esp_err.h"
 #include "esp_log.h"
 #include "config.h"
+#include "build_config.h"
 
 #ifdef IS_USB
 #include "freertos/FreeRTOS.h"
@@ -20,20 +21,20 @@
 // Global USB speaker device handle (exposed for web_server.c power management)
 uac_host_device_handle_t s_spk_dev_handle = NULL;
 
-#define USB_HOST_TASK_PRIORITY  5
-#define UAC_TASK_PRIORITY       5
-#define USER_TASK_PRIORITY      2
-#define USB_HOST_TASK_STACK_SIZE 4096
-#define UAC_TASK_STACK_SIZE     4096
-#define EVENT_QUEUE_SIZE        10
+#define USB_HOST_TASK_PRIORITY   CONFIG_USB_HOST_TASK_PRIO
+#define UAC_TASK_PRIORITY        CONFIG_UAC_TASK_PRIO
+#define USER_TASK_PRIORITY       2
+#define USB_HOST_TASK_STACK_SIZE CONFIG_USB_HOST_TASK_STACK
+#define UAC_TASK_STACK_SIZE      CONFIG_UAC_TASK_STACK
+#define EVENT_QUEUE_SIZE         10
 
 // Timeout and retry configuration
-#define USB_ENUMERATION_TIMEOUT_MS   5000  // Maximum time to wait for device enumeration
-#define USB_TRANSFER_RETRY_COUNT     3     // Maximum number of transfer retries
-#define USB_TRANSFER_RETRY_DELAY_MS  100   // Initial delay between retries (exponential backoff)
-#define USB_RECONNECT_DELAY_MS       2000  // Delay before attempting reconnection
-#define USB_RECONNECT_MAX_ATTEMPTS   5     // Maximum reconnection attempts
-#define USB_INIT_MAX_RETRIES        3     // Maximum USB host initialization retries
+#define USB_ENUMERATION_TIMEOUT_MS   CONFIG_USB_ENUMERATION_TIMEOUT_MS   // Maximum time to wait for device enumeration
+#define USB_TRANSFER_RETRY_COUNT     CONFIG_USB_TRANSFER_RETRY_COUNT     // Maximum number of transfer retries
+#define USB_TRANSFER_RETRY_DELAY_MS  CONFIG_USB_TRANSFER_RETRY_DELAY_MS  // Initial delay between retries (exponential backoff)
+#define USB_RECONNECT_DELAY_MS       CONFIG_USB_RECONNECT_DELAY_MS       // Delay before attempting reconnection
+#define USB_RECONNECT_MAX_ATTEMPTS   CONFIG_USB_RECONNECT_MAX_ATTEMPTS   // Maximum reconnection attempts
+#define USB_INIT_MAX_RETRIES         CONFIG_USB_INIT_MAX_RETRIES         // Maximum USB host initialization retries
 
 typedef enum {
     APP_EVENT = 0,

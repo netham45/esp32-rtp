@@ -9,19 +9,21 @@
 #include <stdbool.h>
 #include "esp_err.h"
 #include "driver/i2c_master.h"
+#include "build_config.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/** @brief BQ25895 I2C address */
-#define BQ25895_I2C_ADDR                  0x6A
+/** @brief BQ25895 I2C address (from Kconfig) */
+#define BQ25895_I2C_ADDR                  CONFIG_BQ25895_I2C_ADDR
 
-/** @brief Default I2C configuration for ESP32 */
-#define BQ25895_DEFAULT_I2C_PORT          0        // I2C port number
-#define BQ25895_DEFAULT_SCL_GPIO          9        // GPIO for I2C SCL
-#define BQ25895_DEFAULT_SDA_GPIO          8        // GPIO for I2C SDA
-#define BQ25895_DEFAULT_I2C_FREQ_HZ       100000   // 100kHz (can be up to 400kHz)
+/** @brief Default I2C configuration for ESP32 (from Kconfig) */
+#define BQ25895_DEFAULT_I2C_PORT          CONFIG_BQ25895_I2C_PORT        // I2C port number
+#define BQ25895_DEFAULT_SCL_GPIO          CONFIG_BQ25895_SCL_GPIO        // GPIO for I2C SCL
+#define BQ25895_DEFAULT_SDA_GPIO          CONFIG_BQ25895_SDA_GPIO        // GPIO for I2C SDA
+#define BQ25895_DEFAULT_I2C_FREQ_HZ       CONFIG_BQ25895_I2C_FREQ_HZ     // 100kHz (can be up to 400kHz)
+/* Keep a sane default timeout if not set elsewhere */
 #define BQ25895_DEFAULT_I2C_TIMEOUT_MS    1000     // I2C timeout in milliseconds
 
 /** @brief BQ25895 register addresses */

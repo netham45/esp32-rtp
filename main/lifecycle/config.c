@@ -98,25 +98,21 @@ uint16_t lifecycle_get_sender_destination_port(void) {
 
 uint8_t lifecycle_get_initial_buffer_size(void) {
     app_config_t *config = config_manager_get_config();
-    return 16;
     return config->initial_buffer_size;
 }
 
 uint8_t lifecycle_get_max_buffer_size(void) {
     app_config_t *config = config_manager_get_config();
-    return 24;
     return config->max_buffer_size;
 }
 
 uint8_t lifecycle_get_buffer_grow_step_size(void) {
     app_config_t *config = config_manager_get_config();
-    return 2;
     return config->buffer_grow_step_size;
 }
 
 uint8_t lifecycle_get_max_grow_size(void) {
     app_config_t *config = config_manager_get_config();
-    return 32;
     return config->max_grow_size;
 }
 
@@ -672,21 +668,172 @@ esp_err_t lifecycle_set_auto_select_best_device(bool enable) {
 
 // ============================================================================
 // BATCH UPDATE FUNCTION
-// Note: Implementation is very long, so I'll include just the essential parts
-// The full implementation would mirror lines 2205-2480 from lifecycle_manager.c
+// Batch update implementation
+// Applies provided fields atomically to the in-memory config and persists to NVS.
+// Keeps legacy flags in sync with device_mode and triggers runtime updates where applicable.
 // ============================================================================
 
 esp_err_t lifecycle_update_config_batch(const lifecycle_config_update_t* updates) {
     if (!updates) {
         return ESP_ERR_INVALID_ARG;
     }
-    
-    // Note: For brevity, the full batch update implementation would be extracted here
-    // from lifecycle_manager.c lines 2205-2480
-    // This is a placeholder - the actual implementation follows the same pattern
-    // as in lifecycle_manager.c but uses lifecycle_get_current_state() instead of s_current_state
-    
-    return ESP_ERR_NOT_SUPPORTED;  // Placeholder - full implementation needed
+
+    app_config_t *config = config_manager_get_config();
+
+    // Resolve device mode (prefer explicit device_mode over legacy booleans)
+    bool device_mode_explicit = updates->update_device_mode;
+    device_mode_t resolved_mode = config->device_mode;
+    if (device_mode_explicit) {
+        resolved_mode = updates->device_mode;
+    } else {
+        // Handle legacy flags only if device_mode wasn't provided
+        if (updates->update_enable_usb_sender) {
+            resolved_mode = updates->enable_usb_sender
+                ? MODE_SENDER_USB
+#ifdef IS_USB
+                : MODE_RECEIVER_USB
+#elif defined(IS_SPDIF)
+                : MODE_RECEIVER_SPDIF
+#else
+                : MODE_RECEIVER_USB
+#endif
+            ;
+        } else if (updates->update_enable_spdif_sender) {
+            resolved_mode = updates->enable_spdif_sender
+                ? MODE_SENDER_SPDIF
+#ifdef IS_USB
+                : MODE_RECEIVER_USB
+#elif defined(IS_SPDIF)
+                : MODE_RECEIVER_SPDIF
+#else
+                : MODE_RECEIVER_USB
+#endif
+            ;
+        }
+    }
+
+    // Network/basic settings
+    if (updates->update_port) {
+        config->port = updates->port;
+    }
+    if (updates->update_hostname && updates->hostname) {
+        strncpy(config->hostname, updates->hostname, sizeof(config->hostname) - 1);
+        config->hostname[sizeof(config->hostname) - 1] = '\0';
+    }
+
+    // AP settings
+    if (updates->update_ap_ssid && updates->ap_ssid) {
+        strncpy(config->ap_ssid, updates->ap_ssid, sizeof(config->ap_ssid) - 1);
+        config->ap_ssid[sizeof(config->ap_ssid) - 1] = '\0';
+    }
+    if (updates->update_ap_password && updates->ap_password) {
+        strncpy(config->ap_password, updates->ap_password, sizeof(config->ap_password) - 1);
+        config->ap_password[sizeof(config->ap_password) - 1] = '\0';
+    }
+    if (updates->update_hide_ap_when_connected) {
+        config->hide_ap_when_connected = updates->hide_ap_when_connected;
+    }
+
+    // Buffer params
+    if (updates->update_initial_buffer_size) {
+        config->initial_buffer_size = updates->initial_buffer_size;
+    }
+    if (updates->update_buffer_grow_step_size) {
+        config->buffer_grow_step_size = updates->buffer_grow_step_size;
+    }
+    if (updates->update_max_buffer_size) {
+        config->max_buffer_size = updates->max_buffer_size;
+    }
+    if (updates->update_max_grow_size) {
+        config->max_grow_size = updates->max_grow_size;
+    }
+
+    // Audio settings (volume handled here; sample_rate handled separately by caller)
+    if (updates->update_volume) {
+        config->volume = updates->volume;
+    }
+
+#ifdef IS_SPDIF
+    // SPDIF pin (guarded by build flag)
+    if (updates->update_spdif_data_pin) {
+        config->spdif_data_pin = updates->spdif_data_pin;
+    }
+#endif
+
+    // Sender settings
+    if (updates->update_sender_destination_ip && updates->sender_destination_ip) {
+        strncpy(config->sender_destination_ip, updates->sender_destination_ip, sizeof(config->sender_destination_ip) - 1);
+        config->sender_destination_ip[sizeof(config->sender_destination_ip) - 1] = '\0';
+    }
+    if (updates->update_sender_destination_port) {
+        config->sender_destination_port = updates->sender_destination_port;
+    }
+
+    // Sleep settings
+    if (updates->update_silence_threshold_ms) {
+        config->silence_threshold_ms = updates->silence_threshold_ms;
+    }
+    if (updates->update_network_check_interval_ms) {
+        config->network_check_interval_ms = updates->network_check_interval_ms;
+    }
+    if (updates->update_activity_threshold_packets) {
+        config->activity_threshold_packets = updates->activity_threshold_packets;
+    }
+    if (updates->update_silence_amplitude_threshold) {
+        config->silence_amplitude_threshold = updates->silence_amplitude_threshold;
+    }
+    if (updates->update_network_inactivity_timeout_ms) {
+        config->network_inactivity_timeout_ms = updates->network_inactivity_timeout_ms;
+    }
+
+    // Audio processing
+    if (updates->update_use_direct_write) {
+        config->use_direct_write = updates->use_direct_write;
+    }
+
+    // mDNS discovery
+    if (updates->update_enable_mdns_discovery) {
+        config->enable_mdns_discovery = updates->enable_mdns_discovery;
+    }
+    if (updates->update_discovery_interval_ms) {
+        config->discovery_interval_ms = updates->discovery_interval_ms;
+    }
+    if (updates->update_auto_select_best_device) {
+        config->auto_select_best_device = updates->auto_select_best_device;
+    }
+
+    // Setup wizard status (normally handled earlier by caller, but support here too)
+    if (updates->update_setup_wizard_completed) {
+        config->setup_wizard_completed = updates->setup_wizard_completed;
+    }
+
+    // SAP stream name
+    if (updates->update_sap_stream_name && updates->sap_stream_name) {
+        strncpy(config->sap_stream_name, updates->sap_stream_name, sizeof(config->sap_stream_name) - 1);
+        config->sap_stream_name[sizeof(config->sap_stream_name) - 1] = '\0';
+    }
+
+    // Apply resolved device mode and keep legacy fields in sync
+    config->device_mode = resolved_mode;
+    switch (resolved_mode) {
+        case MODE_RECEIVER_USB:
+        case MODE_RECEIVER_SPDIF:
+            config->enable_usb_sender = false;
+            config->enable_spdif_sender = false;
+            break;
+        case MODE_SENDER_USB:
+            config->enable_usb_sender = true;
+            config->enable_spdif_sender = false;
+            break;
+        case MODE_SENDER_SPDIF:
+            config->enable_usb_sender = false;
+            config->enable_spdif_sender = true;
+            break;
+    }
+
+    // Persist all changes in one commit
+    esp_err_t ret = config_manager_save_config();
+    return ret;
 }
 
 // ============================================================================
@@ -803,16 +950,174 @@ static esp_err_t buffer_size_reconfigure(void) {
 
 // ============================================================================
 // UNIFIED CONFIGURATION CHANGE HANDLER
-// Note: This is an internal function called by lifecycle_manager
-// The full implementation would mirror handle_configuration_changed from
-// lifecycle_manager.c lines 1877-2076
+// Internal unified configuration change handler
+// Detects changes vs previous snapshot, applies immediate reconfig where possible
+// (network port, mDNS hostname, sender destination, buffers, SPDIF pin, volume, sleep params)
+// and reports whether a restart (state re-evaluation) is required (e.g., device_mode change).
 // ============================================================================
 
 bool lifecycle_config_handle_configuration_changed(void) {
-    // Note: For brevity, this is a placeholder
-    // The full implementation would be extracted from lifecycle_manager.c
-    // lines 1877-2076, adapted to use lifecycle_get_current_state() and
-    // lifecycle_get_context()
-    
-    return false;  // Placeholder
+    ESP_LOGI(TAG, "Checking for configuration changes that can be applied immediately");
+
+    // Track previous configuration across calls
+    static app_config_t previous_config = {0};
+    static bool first_call = true;
+
+    app_config_t *current_config = config_manager_get_config();
+    if (first_call) {
+        memcpy(&previous_config, current_config, sizeof(app_config_t));
+        first_call = false;
+        return false; // Nothing to do on first invocation
+    }
+
+    bool restart_required = false;
+    bool any_changes = false;
+
+    lifecycle_state_t state = lifecycle_get_current_state();
+
+    // Port changes
+    if (current_config->port != previous_config.port) {
+        ESP_LOGI(TAG, "Port changed from %d to %d", previous_config.port, current_config->port);
+        any_changes = true;
+        if (state == LIFECYCLE_STATE_MODE_RECEIVER_USB ||
+            state == LIFECYCLE_STATE_MODE_RECEIVER_SPDIF) {
+            ESP_LOGI(TAG, "Applying port change immediately");
+            network_update_port();
+        }
+    }
+
+    // Hostname changes
+    if (strcmp(current_config->hostname, previous_config.hostname) != 0) {
+        ESP_LOGI(TAG, "Hostname changed from %s to %s", previous_config.hostname, current_config->hostname);
+        any_changes = true;
+        ESP_LOGI(TAG, "Updating mDNS hostname immediately");
+        mdns_service_update_hostname();
+    }
+
+    // Sender destination changes
+    if (strcmp(current_config->sender_destination_ip, previous_config.sender_destination_ip) != 0 ||
+        current_config->sender_destination_port != previous_config.sender_destination_port) {
+        ESP_LOGI(TAG, "Sender destination changed: %s:%d -> %s:%d",
+                 previous_config.sender_destination_ip, previous_config.sender_destination_port,
+                 current_config->sender_destination_ip, current_config->sender_destination_port);
+        any_changes = true;
+
+        if (state == LIFECYCLE_STATE_MODE_SENDER_USB ||
+            state == LIFECYCLE_STATE_MODE_SENDER_SPDIF) {
+            ESP_LOGI(TAG, "Updating sender destination immediately");
+            rtp_sender_update_destination();
+        }
+    }
+
+    // Buffer parameter changes
+    if (current_config->initial_buffer_size != previous_config.initial_buffer_size ||
+        current_config->max_buffer_size != previous_config.max_buffer_size ||
+        current_config->buffer_grow_step_size != previous_config.buffer_grow_step_size ||
+        current_config->max_grow_size != previous_config.max_grow_size) {
+        ESP_LOGI(TAG, "Buffer parameters changed");
+        any_changes = true;
+
+        if (state == LIFECYCLE_STATE_MODE_RECEIVER_USB ||
+            state == LIFECYCLE_STATE_MODE_RECEIVER_SPDIF) {
+            ESP_LOGI(TAG, "Reconfiguring buffer parameters immediately");
+            esp_err_t ret = buffer_size_reconfigure();
+            if (ret != ESP_OK) {
+                ESP_LOGW(TAG, "Buffer reconfiguration failed, restart may be needed");
+                restart_required = true;
+            }
+        }
+    }
+
+    // SPDIF pin changes
+    if (current_config->spdif_data_pin != previous_config.spdif_data_pin) {
+        ESP_LOGI(TAG, "SPDIF pin changed from %d to %d", previous_config.spdif_data_pin, current_config->spdif_data_pin);
+        any_changes = true;
+
+        if (state == LIFECYCLE_STATE_MODE_RECEIVER_SPDIF ||
+            state == LIFECYCLE_STATE_MODE_SENDER_SPDIF) {
+            ESP_LOGI(TAG, "Reconfiguring SPDIF pin immediately");
+            esp_err_t ret = spdif_pin_reconfigure(current_config->spdif_data_pin);
+            if (ret != ESP_OK) {
+                ESP_LOGW(TAG, "SPDIF pin reconfiguration failed, restart required");
+                restart_required = true;
+            }
+        }
+    }
+
+    // Volume changes
+    if (current_config->volume != previous_config.volume) {
+        ESP_LOGI(TAG, "Volume changed from %.2f to %.2f",
+                 previous_config.volume, current_config->volume);
+        any_changes = true;
+#ifdef IS_USB
+        if (state == LIFECYCLE_STATE_MODE_RECEIVER_USB) {
+            ESP_LOGI(TAG, "Applying volume change immediately");
+            audio_out_update_volume();
+        }
+#endif
+    }
+
+    // Direct write changes
+    if (current_config->use_direct_write != previous_config.use_direct_write) {
+        ESP_LOGI(TAG, "Direct write mode changed from %d to %d",
+                 previous_config.use_direct_write, current_config->use_direct_write);
+        any_changes = true;
+        // No immediate action required here
+    }
+
+    // Sleep monitoring parameter changes
+    if (current_config->silence_threshold_ms != previous_config.silence_threshold_ms ||
+        current_config->network_check_interval_ms != previous_config.network_check_interval_ms ||
+        current_config->activity_threshold_packets != previous_config.activity_threshold_packets ||
+        current_config->silence_amplitude_threshold != previous_config.silence_amplitude_threshold ||
+        current_config->network_inactivity_timeout_ms != previous_config.network_inactivity_timeout_ms) {
+        ESP_LOGI(TAG, "Sleep monitoring parameters changed");
+        any_changes = true;
+
+        lifecycle_context_t *ctx = lifecycle_get_context();
+        if (ctx && ctx->monitoring_active) {
+            ESP_LOGI(TAG, "Updating active sleep monitoring parameters");
+            ctx->cached_silence_threshold_ms = current_config->silence_threshold_ms;
+            ctx->cached_network_check_interval_ms = current_config->network_check_interval_ms;
+            ctx->cached_activity_threshold_packets = current_config->activity_threshold_packets;
+            ctx->cached_silence_amplitude_threshold = current_config->silence_amplitude_threshold;
+            ctx->cached_network_inactivity_timeout_ms = current_config->network_inactivity_timeout_ms;
+        }
+    }
+
+    // Device mode changes always require restart
+    if (current_config->device_mode != previous_config.device_mode) {
+        ESP_LOGI(TAG, "Device mode changed from %d to %d - restart required",
+                 previous_config.device_mode, current_config->device_mode);
+        any_changes = true;
+        restart_required = true;
+    }
+
+    // AP visibility setting changes
+    if (current_config->hide_ap_when_connected != previous_config.hide_ap_when_connected) {
+        ESP_LOGI(TAG, "AP visibility setting changed from %d to %d",
+                 previous_config.hide_ap_when_connected, current_config->hide_ap_when_connected);
+        any_changes = true;
+
+        wifi_manager_state_t wifi_state = wifi_manager_get_state();
+        if (wifi_state == WIFI_MANAGER_STATE_CONNECTED) {
+            if (current_config->hide_ap_when_connected) {
+                ESP_LOGI(TAG, "Hiding AP interface immediately");
+                esp_wifi_set_mode(WIFI_MODE_STA);
+            } else {
+                ESP_LOGI(TAG, "Showing AP interface immediately");
+                esp_wifi_set_mode(WIFI_MODE_APSTA);
+            }
+        }
+    }
+
+    // Update previous config snapshot
+    if (any_changes) {
+        ESP_LOGI(TAG, "Configuration changes detected, updating previous config cache");
+        memcpy(&previous_config, current_config, sizeof(app_config_t));
+    } else {
+        ESP_LOGD(TAG, "No configuration changes detected");
+    }
+
+    return restart_required;
 }

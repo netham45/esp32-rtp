@@ -1,6 +1,8 @@
 // RTP packet structure: [12-byte RTP header] + [1152-byte PCM audio payload]
 // Total packet size: 1164 bytes
 
+#include "sdkconfig.h"
+#include "build_config.h"
 #include "network_in.h"
 #include "global.h"
 #include "audio_out.h"
@@ -41,9 +43,9 @@ typedef struct __attribute__((packed)) {
 #define RTP_PT(mpt)           ((mpt) & 0x7F)
 
 // Network constants
-#define UDP_PORT 4010
-#define MAX_RTP_PACKET_SIZE (sizeof(rtp_header_t) + (15 * 4) + 1152 + 512)  // Max: 12 + 60 (CSRCs) + 1152 (audio) + 512 (padding/extensions)
-#define PCM_CHUNK_SIZE 1152  // 288 samples * 2 channels * 2 bytes (typical expected size)
+#define UDP_PORT CONFIG_RTP_PORT
+#define MAX_RTP_PACKET_SIZE (sizeof(rtp_header_t) + (15 * 4) + PCM_CHUNK_SIZE + 512)  // Max: 12 + 60 (CSRCs) + audio + 512 (padding/extensions)
+ // PCM chunk size provided by global.h (PCM_CHUNK_SIZE)
 // SAP functionality moved to sap_listener.c
 
 // Socket and task handles

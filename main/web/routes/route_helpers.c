@@ -9,6 +9,7 @@
 #include "wifi/wifi_manager.h"
 #include <string.h>
 #include <stdlib.h>
+#include "visualizer/visualizer_task.h"
 
 static const char *TAG = "route_helpers";
 
@@ -23,6 +24,12 @@ esp_err_t send_html_chunked(httpd_req_t *req, const char* html_start, size_t htm
     
     ESP_LOGI(TAG, "Sending HTML chunked, total size: %zu bytes", html_size);
     ESP_LOGI(TAG, "Free heap: %d bytes", esp_get_free_heap_size());
+
+    // Stop LED visualizer while we may read from flash to avoid RMT encoder IRAM issues
+    bool viz_was_active = visualizer_is_active();
+    if (viz_was_active) {
+        visualizer_deinit();
+    }
     
     // Set content type
     httpd_resp_set_type(req, "text/html");
@@ -31,6 +38,7 @@ esp_err_t send_html_chunked(httpd_req_t *req, const char* html_start, size_t htm
     char *chunk_buffer = malloc(CHUNK_SIZE + 512); // Extra space for replacements
     if (!chunk_buffer) {
         ESP_LOGE(TAG, "Failed to allocate chunk buffer");
+        if (viz_was_active) visualizer_init();
         return httpd_resp_send_500(req);
     }
     
@@ -183,6 +191,11 @@ esp_err_t send_html_chunked(httpd_req_t *req, const char* html_start, size_t htm
     }
     
     free(chunk_buffer);
+
+    // Restart visualizer after sending response
+    if (viz_was_active) {
+        visualizer_init();
+    }
     
     #undef CHUNK_SIZE
     return ret;

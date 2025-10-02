@@ -22,7 +22,9 @@
         "pcm_visualizer.h": "c",
         "sleep.h": "c",
         "modes.h": "c",
-        "services.h": "c"
+        "services.h": "c",
+        "spdif_in.h": "c",
+        "spdif_out.h": "c"
     },
     "chat.agent.enabled": false,
     "chat.commandCenter.enabled": false,

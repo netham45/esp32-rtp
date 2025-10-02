@@ -1,12 +1,13 @@
 #pragma once
+#include "build_config.h"
 #include "stdint.h"
 #include "config.h"
 #include "stdbool.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 
-// PCM Bytes per chunk, non-configurable (Part of Scream)
-#define PCM_CHUNK_SIZE 1152
+// PCM bytes per chunk (from Kconfig to keep single source of truth)
+#define PCM_CHUNK_SIZE CONFIG_PCM_CHUNK_SIZE
 
 // Network activity monitoring
 #define NETWORK_PACKET_RECEIVED_BIT BIT0

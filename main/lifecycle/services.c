@@ -5,6 +5,7 @@
 #include "../wifi/wifi_manager.h"
 #include "../web/web_server.h"
 #include "../mdns/mdns_discovery.h"
+#include "../mdns/mdns_service.h"
 #include "../ntp/ntp_client.h"
 #ifdef IS_SPDIF
 #include "../sender/spdif_in/spdif_in.h"
@@ -66,22 +67,31 @@ esp_err_t lifecycle_services_init_spdif_receiver(void) {
 
 esp_err_t lifecycle_services_init_mdns(void) {
     app_config_t *config = config_manager_get_config();
-    
+
+    // Initialize mDNS service first (required for both discovery and advertisement)
+    ESP_LOGI(TAG, "Initializing mDNS service");
+    esp_err_t ret = mdns_service_init();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize mDNS service: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    // Start mDNS service advertisement
+    ESP_LOGI(TAG, "Starting mDNS service advertisement");
+    mdns_service_start();
+
     // Start mDNS discovery if enabled
     if (config->enable_mdns_discovery) {
-        ESP_LOGI(TAG, "Starting mDNS discovery service");
-        esp_err_t ret = mdns_discovery_start();
+        ESP_LOGI(TAG, "Starting mDNS discovery");
+        ret = mdns_discovery_start();
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Failed to start mDNS discovery: %s", esp_err_to_name(ret));
-            return ret;
+            // Don't fail initialization if discovery fails - advertisement still works
         }
-        
-        // Enable advertisement after network is ready
-        mdns_discovery_enable_advertisement(true);
     }
 
     // Start NTP client
     // initialize_ntp_client(); // DISABLED: causing socket leak (errno 112)
-    
+
     return ESP_OK;
 }

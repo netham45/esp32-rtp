@@ -19,6 +19,8 @@ static led_controller_t* led_controller = NULL;
 // Configuration
 static led_color_scheme_t color_scheme = LED_COLOR_HEAT;
 static float smoothing = 0.7f;
+static volatile bool s_viz_suspended = false;
+static volatile bool s_rendering = false;
 
 // Main visualizer task
 static void visualizer_task(void* param) {
@@ -32,7 +34,15 @@ static void visualizer_task(void* param) {
     TickType_t last_wake_time = xTaskGetTickCount();
 
     while (task_running) {
+        // When suspended (e.g., during NVS flash commits when cache is disabled), skip LED updates
+        if (s_viz_suspended) {
+            s_rendering = false;
+            vTaskDelayUntil(&last_wake_time, update_period);
+            continue;
+        }
+
         // Get loudness values from PCM visualizer
+        s_rendering = true;
         esp_err_t ret = pcm_viz_get_loudness(&loudness);
 
         if (ret == ESP_OK) {
@@ -40,6 +50,7 @@ static void visualizer_task(void* param) {
             led_controller_update_from_loudness_ex(led_controller, &loudness);
             led_controller_render(led_controller);
         }
+        s_rendering = false;
 
         // Wait until next update period
         vTaskDelayUntil(&last_wake_time, update_period);
@@ -69,11 +80,12 @@ esp_err_t visualizer_init(void) {
     }
 
     // Configure LED strip
+    // Disable RMT DMA to avoid ISR-driven encoding while flash cache can be disabled (e.g. during NVS reads)
     visualizer_led_config_t led_config = {
         .gpio_pin = 48,  // Default GPIO for LED strip
         .num_leds = LED_STRIP_NUM_LEDS,
         .brightness = 128,
-        .enable_dma = true,
+        .enable_dma = false,  // critical: avoid dma_tx_eof ISR path calling encoder when cache may be off
         .color_scheme = color_scheme,
         .smoothing_factor = smoothing
     };
@@ -214,4 +226,27 @@ esp_err_t visualizer_get_stats(visualizer_stats_t* stats) {
     stats->led_errors = 0;
 
     return ESP_OK;
+}
+
+// Runtime suspend/resume helpers to avoid LED/RMT calls while flash cache is disabled.
+// Safe to call regardless of visualizer init state; the task loop checks this flag.
+esp_err_t visualizer_suspend(void) {
+    s_viz_suspended = true;
+    // Wait briefly for any in-flight render to finish to avoid cache-disabled refresh
+    for (int i = 0; i < 5 && s_rendering; ++i) {
+        vTaskDelay(pdMS_TO_TICKS(5));
+    }
+    return ESP_OK;
+}
+
+esp_err_t visualizer_resume(void) {
+    s_viz_suspended = false;
+    return ESP_OK;
+}
+/**
+ * Report whether the visualizer is currently active (task running and controller allocated).
+ * Used by config manager to temporarily stop/restart LEDs around flash commits.
+ */
+bool visualizer_is_active(void) {
+    return task_running && (led_controller != NULL);
 }

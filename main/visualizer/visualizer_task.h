@@ -3,8 +3,9 @@
 
 #include "esp_err.h"
 #include "led_strip_controller.h"
+#include <stdbool.h>
 
-#ifdef __cplusplus
+#ifdef __cplusplus 
 extern "C" {
 #endif
 
@@ -84,6 +85,19 @@ esp_err_t visualizer_set_gain(float gain);
  * @return ESP_OK on success
  */
 esp_err_t visualizer_get_stats(visualizer_stats_t* stats);
+
+/**
+ * Query whether the visualizer is currently active (initialized and running).
+ */
+bool visualizer_is_active(void);
+
+/**
+ * Temporarily suspend/resume LED updates safely.
+ * Safe to call even if visualizer is not initialized.
+ * Used to avoid calling RMT/LED code while flash cache is disabled (e.g., during NVS writes).
+ */
+esp_err_t visualizer_suspend(void);
+esp_err_t visualizer_resume(void);
 
 #ifdef __cplusplus
 }

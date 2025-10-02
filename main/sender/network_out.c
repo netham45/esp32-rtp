@@ -1,3 +1,6 @@
+#include "sdkconfig.h"
+#include "build_config.h"
+#include "global.h"
 #include <config.h>
 #include "network_out.h"
 #include "lifecycle_manager.h"
@@ -49,8 +52,8 @@ typedef struct __attribute__((packed)) {
 #define RTP_TIMESTAMP_INC    288 // Samples per packet at 48kHz (1152 bytes / 4 bytes per sample)
 
 // SAP constants
-#define SAP_MULTICAST_ADDR   "224.2.127.254"
-#define SAP_PORT             9875
+#define SAP_MULTICAST_ADDR   CONFIG_SAP_MULTICAST_ADDR
+#define SAP_PORT             CONFIG_SAP_PORT
 #define SAP_ANNOUNCE_INTERVAL_MS 30000  // 30 seconds
 #define SAP_VERSION          1
 
@@ -58,11 +61,11 @@ RingbufHandle_t pcm_buffer = NULL;
 // Scream header for 16-bit 48KHz stereo audio
 // static const char header[] = {1, 16, 2, 0, 0};  // Commented out - using RTP header instead
 #define HEADER_SIZE RTP_HEADER_SIZE
-#define CHUNK_SIZE 1152
+#define CHUNK_SIZE PCM_CHUNK_SIZE
 #define PACKET_SIZE (CHUNK_SIZE + HEADER_SIZE)
 
 // Socket options
-#define UDP_TX_BUFFER_SIZE (1152 * 4)
+#define UDP_TX_BUFFER_SIZE (PCM_CHUNK_SIZE * 4)
 #define UDP_SEND_TIMEOUT_MS 10
 #define MAX_SEND_RETRIES 1
 
@@ -471,8 +474,8 @@ esp_err_t rtp_sender_update_destination(void)
     
     // Validate port
     if (dest_port == 0) {
-        ESP_LOGW(TAG, "Destination port is 0, using default port 4010");
-        dest_port = 4010;
+        ESP_LOGW(TAG, "Destination port is 0, using default port %d", CONFIG_RTP_PORT);
+        dest_port = CONFIG_RTP_PORT;
     }
     
     // Validate IP format by attempting to convert it

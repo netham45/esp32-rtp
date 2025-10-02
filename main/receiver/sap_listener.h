@@ -5,15 +5,16 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <time.h>
+#include "build_config.h"
 
-// Configuration constants
-#define SAP_MAX_ANNOUNCEMENTS 10
-#define SAP_ANNOUNCEMENT_TIMEOUT_SEC 120  // 2 minutes expiration
-#define SAP_CLEANUP_INTERVAL_SEC 30       // Check for expired entries every 30 seconds
-#define SAP_PORT 9875
-#define SAP_MULTICAST_ADDR "224.2.127.254"
-#define SAP_MULTICAST_ADDR_PULSEAUDIO "224.0.0.56"
-#define SAP_BUFFER_SIZE 1024
+// Configuration constants (sourced from Kconfig via build_config.h)
+#define SAP_MAX_ANNOUNCEMENTS CONFIG_SAP_MAX_ANNOUNCEMENTS
+#define SAP_ANNOUNCEMENT_TIMEOUT_SEC CONFIG_SAP_ANNOUNCEMENT_TIMEOUT_SEC  // 2 minutes expiration
+#define SAP_CLEANUP_INTERVAL_SEC CONFIG_SAP_CLEANUP_INTERVAL_SEC          // Check for expired entries every 30 seconds
+#define SAP_PORT CONFIG_SAP_PORT
+#define SAP_MULTICAST_ADDR CONFIG_SAP_MULTICAST_ADDR
+#define SAP_MULTICAST_ADDR_PULSEAUDIO CONFIG_SAP_PULSEAUDIO_ADDR
+#define SAP_BUFFER_SIZE CONFIG_SAP_BUFFER_SIZE
 
 /**
  * @brief SAP announcement structure with expiration tracking

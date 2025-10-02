@@ -1,6 +1,8 @@
 #pragma once
-// TCP port for Scream server data, configurable
-#define PORT 4010
+#include "build_config.h"  // Kconfig-backed build-time options
+
+// TCP port for Scream server data (from Kconfig)
+#define PORT CONFIG_RTP_PORT
 
 // Number of chunks to be buffered before playback starts, configurable
 #define INITIAL_BUFFER_SIZE 4
@@ -11,12 +13,12 @@
 // Max number of chunks to be targeted for buffer
 #define MAX_GROW_SIZE 16
 
-// Sample rate for incoming PCM, configurable
-#define SAMPLE_RATE 48000
-// Bit depth for incoming PCM, non-configurable (does not implement 24->32 bit padding)
-#define BIT_DEPTH 16
-//Volume 0.0f-1.0f
-#define VOLUME 1.0f
+// Sample rate for incoming PCM (from Kconfig)
+#define SAMPLE_RATE CONFIG_SAMPLE_RATE
+// Bit depth for incoming PCM (from Kconfig)
+#define BIT_DEPTH CONFIG_BIT_DEPTH
+// Volume 0.0f-1.0f (from Kconfig percent)
+#define VOLUME (CONFIG_DEFAULT_VOLUME_PCT / 100.0f)
 
 // Time to wake from deep sleep to check for DAC (in ms)
 #define DAC_CHECK_SLEEP_TIME_MS 2000
@@ -28,8 +30,12 @@
 #define SILENCE_AMPLITUDE_THRESHOLD 10   // Audio amplitude below this is considered silent (0-32767)
 #define NETWORK_INACTIVITY_TIMEOUT_MS 5000 // Enter sleep mode after no packets for 5 seconds
 
-
+// Feature bridge: keep legacy macros aligned with Kconfig feature toggles
+#if CONFIG_FEATURE_SPDIF
 #define IS_SPDIF
+#endif
+#if CONFIG_FEATURE_USB
 #define IS_USB
+#endif
 
 #define TAG "scream_receiver"
