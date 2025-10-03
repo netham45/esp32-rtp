@@ -11,6 +11,8 @@
 
 static const char *TAG = "usb_in";
 
+RingbufHandle_t usb_in_pcm_buffer = NULL;
+
 // State management structure
 static struct {
     bool initialized;

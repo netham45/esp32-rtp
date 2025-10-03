@@ -580,10 +580,24 @@ static void rtp_sender_task(void *arg)
     // For pacing the sender to match the audio rate
     TickType_t xLastWakeTime;
     // 1152 bytes per chunk / (48000 samples/sec * 2 channels * 2 bytes/sample) = 6ms per chunk
-    const TickType_t xFrequency = pdMS_TO_TICKS(3);
+    const TickType_t xFrequency = pdMS_TO_TICKS(3); 
     xLastWakeTime = xTaskGetTickCount();
 
     RingbufHandle_t pcm_out_buffer = NULL;
+
+    device_mode_t current_mode = lifecycle_get_device_mode();
+    ESP_LOGI(TAG, "Waiting for ringbuf, mode: %d", current_mode);
+    // Both USB and SPDIF sender modes use the same ring buffer approach
+    if (!pcm_out_buffer) {
+
+        if (current_mode == MODE_SENDER_SPDIF) {
+            while (spdif_in_get_ringbuf() == NULL) vTaskDelay(0);
+            pcm_out_buffer = spdif_in_get_ringbuf();
+        } else  if (current_mode == MODE_SENDER_USB){
+            while (usb_in_get_ringbuf() == NULL) vTaskDelay(0);
+            pcm_out_buffer = usb_in_get_ringbuf();
+        }
+    }
     
     while (s_is_sender_running) {
         if (s_is_muted) {
@@ -597,22 +611,6 @@ static void rtp_sender_task(void *arg)
             size_t bytes_to_read = CHUNK_SIZE - bytes_in_buffer;
             int bytes_read = 0;
 
-            // Check device mode at runtime
-            device_mode_t current_mode = lifecycle_get_device_mode();
-            
-            // Both USB and SPDIF sender modes use the same ring buffer approach
-            if (!pcm_out_buffer) {
-
-                if (current_mode == MODE_SENDER_SPDIF) {
-                    while (spdif_in_get_ringbuf() == NULL) vTaskDelay(0);
-                    pcm_out_buffer = spdif_in_get_ringbuf();
-                } else  if (current_mode == MODE_SENDER_USB){
-                    while (usb_in_get_ringbuf() == NULL) vTaskDelay(0);
-                    pcm_out_buffer = usb_in_get_ringbuf();
-                }
-                continue;
-            }
-            
             size_t item_size;
             // Try to receive up to bytes_to_read from the ring buffer
             uint8_t *item = (uint8_t *)xRingbufferReceiveUpTo(

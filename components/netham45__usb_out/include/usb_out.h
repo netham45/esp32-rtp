@@ -4,13 +4,17 @@
 
 #include "esp_err.h"
 #include "usb/uac_host.h"
+#include <stdint.h>
+
+// Define PCM chunk size for USB output
+#define USB_OUT_PCM_CHUNK_SIZE 1024
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 esp_err_t usb_out_init(void);
-esp_err_t usb_out_start(void);
+esp_err_t usb_out_start(uint32_t sample_rate, uint8_t bit_depth, float initial_volume);
 esp_err_t usb_out_stop(void);
 esp_err_t usb_out_deinit(void);
 uac_host_device_handle_t usb_out_get_device_handle(void);

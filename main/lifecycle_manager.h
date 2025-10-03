@@ -4,6 +4,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include "config/config_manager.h"  // For device_mode_t
+#include "bq25895/bq25895.h"
+#include "bq25895/bq25895_integration.h"
 
 /**
  * @brief Events that can be sent to the lifecycle manager
@@ -474,3 +476,38 @@ esp_err_t lifecycle_reset_config(void);
  * @return ESP_OK on success, or an error code on failure
  */
 esp_err_t lifecycle_save_config(void);
+
+/**
+ * @brief Retrieve current BQ25895 status via lifecycle facade
+ */
+esp_err_t lifecycle_get_battery_status(bq25895_status_t *status);
+
+/**
+ * @brief Retrieve configured BQ25895 charge parameters via lifecycle facade
+ */
+esp_err_t lifecycle_get_battery_params(bq25895_charge_params_t *params);
+
+/**
+ * @brief Apply BQ25895 charge parameters via lifecycle facade
+ */
+esp_err_t lifecycle_set_battery_params(const bq25895_charge_params_t *params);
+
+/**
+ * @brief Reset BQ25895 device through lifecycle facade
+ */
+esp_err_t lifecycle_reset_battery(void);
+
+/**
+ * @brief Control BQ25895 CE pin (active low) via lifecycle facade
+ */
+esp_err_t lifecycle_set_battery_ce_pin(bool enable);
+
+/**
+ * @brief Read BQ25895 register through lifecycle facade
+ */
+esp_err_t lifecycle_read_battery_register(uint8_t reg, uint8_t *value);
+
+/**
+ * @brief Write BQ25895 register through lifecycle facade
+ */
+esp_err_t lifecycle_write_battery_register(uint8_t reg, uint8_t value);

@@ -1,0 +1,18 @@
+dependencies:
+  idf:
+    version: '>=5.4'
+  espressif/usb_device_uac:
+    version: 0.*
+    rules:
+    - if: target in [esp32s2, esp32s3, esp32p4]
+description: USB UAC 1.0 Device Input Driver
+repository: git://github.com/netham45/esp32-usb-in
+repository_info:
+  commit_sha: 000000000000000000000000000000000000000e
+  path: usb-in/
+targets:
+- esp32s2
+- esp32s3
+- esp32p4
+url: https://github.com/netham45/esp32-usb-in
+version: 1.0.0

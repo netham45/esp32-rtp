@@ -33,8 +33,22 @@ esp_err_t web_server_start(void)
     // This allows it to be accessible from both AP and STA interfaces
     config.server_port = 80;
     config.ctrl_port = 32768;
-    config.task_priority = 5;
+    
+    // IMPORTANT: Increase task stack size to handle complex requests
+    // Default is 4096 which may be too small for our needs
+    config.stack_size = 8192;
+    
+    // Set task priority to ensure responsiveness
+    config.task_priority = 8;  // Higher priority for better responsiveness
+    
+    // Use core 1 to avoid conflicts with WiFi/network tasks on core 0
     config.core_id = 0;
+    
+    // Increase max open sockets if needed
+    config.max_open_sockets = 7;
+    
+    // Set backlog connections
+    config.backlog_conn = 5;
 
     // You might need to modify sdkconfig to increase HTTPD_MAX_REQ_HDR_LEN and HTTPD_MAX_URI_LEN
 

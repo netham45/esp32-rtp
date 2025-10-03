@@ -5,6 +5,8 @@
 #include "lifecycle/sap.h"
 #include "lifecycle/sleep.h"
 #include "lifecycle/config.h"
+#include "bq25895/bq25895_integration.h"
+#include "bq25895/bq25895.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "esp_log.h"
@@ -90,3 +92,31 @@ void lifecycle_manager_report_network_activity(void) {
 
 // SAP notification is delegated to lifecycle/sap.c
 // esp_err_t lifecycle_manager_notify_sap_stream(...) is in sap.c
+
+esp_err_t lifecycle_get_battery_status(bq25895_status_t *status) {
+    return bq25895_integration_get_status(status);
+}
+
+esp_err_t lifecycle_get_battery_params(bq25895_charge_params_t *params) {
+    return bq25895_integration_get_charge_params(params);
+}
+
+esp_err_t lifecycle_set_battery_params(const bq25895_charge_params_t *params) {
+    return bq25895_integration_set_charge_params(params);
+}
+
+esp_err_t lifecycle_reset_battery(void) {
+    return bq25895_integration_reset();
+}
+
+esp_err_t lifecycle_set_battery_ce_pin(bool enable) {
+    return bq25895_integration_set_ce_pin(enable);
+}
+
+esp_err_t lifecycle_read_battery_register(uint8_t reg, uint8_t *value) {
+    return bq25895_integration_read_register(reg, value);
+}
+
+esp_err_t lifecycle_write_battery_register(uint8_t reg, uint8_t value) {
+    return bq25895_integration_write_register(reg, value);
+}

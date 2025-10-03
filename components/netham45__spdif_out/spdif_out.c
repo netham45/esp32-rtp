@@ -5,22 +5,13 @@
     software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
     CONDITIONS OF ANY KIND, either express or implied.
 */
+#include <stdbool.h>
 #include "freertos/FreeRTOS.h"
 #include "driver/i2s.h"
 #include "esp_log.h"
 #include "esp_err.h"
 
-#include "config/config_manager.h"
-#include "config.h"
-
-#define TAG "spdif"
-
-// Get SPDIF pin from config
-static uint8_t get_spdif_pin(void)
-{
-    app_config_t *config = config_manager_get_config();
-    return config->spdif_data_pin;
-}
+#define TAG "spdif_out"
 
 #define I2S_NUM			(0)
 
@@ -38,7 +29,16 @@ static uint8_t get_spdif_pin(void)
 #define SPDIF_BUF_ARRAY_SIZE	(SPDIF_BUF_SIZE / sizeof(uint32_t))
 
 static uint32_t spdif_buf[SPDIF_BUF_ARRAY_SIZE];
-static uint32_t *spdif_ptr;
+
+typedef struct {
+    bool initialized;
+    bool started;
+    int rate;
+    int pin;
+    uint32_t *ptr;
+} spdif_state_t;
+
+static spdif_state_t s_spdif = {0};
 
 /*
  * 8bit PCM to 16bit BMC conversion table, LSb first, 1 end
@@ -93,21 +93,33 @@ static void spdif_buf_init(void)
     uint32_t bmc_mw = BMC_W;
 
     for (i = 0; i < SPDIF_BUF_ARRAY_SIZE; i += 2) {
-	spdif_buf[i] = bmc_mw ^= BMC_MW_DIF;
+        spdif_buf[i] = bmc_mw ^= BMC_MW_DIF;
     }
+
+    s_spdif.ptr = spdif_buf;
 }
 
 // initialize I2S for S/PDIF transmission
 // Returns ESP_OK on success, or an error code on failure
-esp_err_t spdif_init(int rate)
+esp_err_t spdif_init(int rate, int pin)
 {
+    if (rate <= 0) {
+        ESP_LOGE(TAG, "Invalid sample rate: %d", rate);
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (s_spdif.initialized) {
+        ESP_LOGW(TAG, "S/PDIF already initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+
     esp_err_t err;
     int sample_rate = rate * BMC_BITS_FACTOR;
     int bclk = sample_rate * I2S_BITS_PER_SAMPLE * I2S_CHANNELS;
     int mclk = (I2S_BUG_MAGIC / bclk) * bclk; // use mclk for avoiding I2S bug
     i2s_config_t i2s_config = {
         .mode = I2S_MODE_MASTER | I2S_MODE_TX,
-    	.sample_rate = sample_rate,
+        .sample_rate = sample_rate,
         .bits_per_sample = I2S_BITS_PER_SAMPLE,
         .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
         .communication_format = I2S_COMM_FORMAT_I2S,
@@ -115,13 +127,13 @@ esp_err_t spdif_init(int rate)
         .dma_buf_count = DMA_BUF_COUNT,
         .dma_buf_len = DMA_BUF_LEN,
         .use_apll = true,
-	.tx_desc_auto_clear = true,
-    	.fixed_mclk = mclk,	// avoiding I2S bug
+        .tx_desc_auto_clear = true,
+        .fixed_mclk = mclk, // avoiding I2S bug
     };
     i2s_pin_config_t pin_config = {
         .bck_io_num = -1,
         .ws_io_num = -1,
-        .data_out_num = get_spdif_pin(),
+        .data_out_num = pin,
         .data_in_num = -1,
     };
 
@@ -133,51 +145,189 @@ esp_err_t spdif_init(int rate)
 
     err = i2s_set_pin(I2S_NUM, &pin_config);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to set I2S pins (data_out_num=%d): %s", 
+        ESP_LOGE(TAG, "Failed to set I2S pins (data_out_num=%d): %s",
                  pin_config.data_out_num, esp_err_to_name(err));
-        // Uninstall driver to clean up
         i2s_driver_uninstall(I2S_NUM);
         return err;
     }
 
-    // initialize S/PDIF buffer
     spdif_buf_init();
-    spdif_ptr = spdif_buf;
-    
+
+    s_spdif.initialized = true;
+    s_spdif.started = false;
+    s_spdif.rate = rate;
+    s_spdif.pin = pin;
+return ESP_OK;
+}
+
+esp_err_t spdif_start(void)
+{
+if (!s_spdif.initialized) {
+    ESP_LOGE(TAG, "Cannot start S/PDIF: not initialized");
+    return ESP_ERR_INVALID_STATE;
+}
+
+if (s_spdif.started) {
     return ESP_OK;
 }
+
+spdif_buf_init();
+
+esp_err_t err = i2s_zero_dma_buffer(I2S_NUM);
+if (err != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to zero I2S DMA buffer: %s", esp_err_to_name(err));
+    return err;
+}
+
+err = i2s_start(I2S_NUM);
+if (err != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to start I2S: %s", esp_err_to_name(err));
+    return err;
+}
+
+s_spdif.started = true;
+return ESP_OK;
+}
+
+esp_err_t spdif_stop(void)
+{
+if (!s_spdif.initialized) {
+    ESP_LOGE(TAG, "Cannot stop S/PDIF: not initialized");
+    return ESP_ERR_INVALID_STATE;
+}
+
+if (!s_spdif.started) {
+    return ESP_OK;
+}
+
+esp_err_t err = i2s_stop(I2S_NUM);
+if (err != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to stop I2S: %s", esp_err_to_name(err));
+    return err;
+}
+
+err = i2s_zero_dma_buffer(I2S_NUM);
+if (err != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to clear I2S DMA buffer: %s", esp_err_to_name(err));
+    return err;
+}
+
+s_spdif.started = false;
+s_spdif.ptr = spdif_buf;
+
+return ESP_OK;
+}
+
+esp_err_t spdif_deinit(void)
+{
+if (!s_spdif.initialized) {
+    return ESP_ERR_INVALID_STATE;
+}
+
+esp_err_t err = ESP_OK;
+
+if (s_spdif.started) {
+    err = spdif_stop();
+    if (err != ESP_OK) {
+        return err;
+    }
+}
+
+err = i2s_driver_uninstall(I2S_NUM);
+if (err != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to uninstall I2S driver: %s", esp_err_to_name(err));
+    return err;
+}
+
+s_spdif = (spdif_state_t){0};
+
+return ESP_OK;
+}
+
 
 // write audio data to I2S buffer
 void spdif_write(const void *src, size_t size)
 {
-    const uint8_t *p = src;
-
-    while (p < (uint8_t *)src + size) {
-
-	// convert PCM 16bit data to BMC 32bit pulse pattern
-	*(spdif_ptr + 1) = (uint32_t)(((bmc_tab[*p] << 16) ^ bmc_tab[*(p + 1)]) << 1) >> 1;
-
-	p += 2;
-	spdif_ptr += 2; 	// advance to next audio data
- 
-	if (spdif_ptr >= &spdif_buf[SPDIF_BUF_ARRAY_SIZE]) {
-    	    size_t i2s_write_len;
-
-	    // set block start preamble
-	    ((uint8_t *)spdif_buf)[SYNC_OFFSET] ^= SYNC_FLIP;
-
-	    i2s_write(I2S_NUM, spdif_buf, sizeof(spdif_buf), &i2s_write_len, portMAX_DELAY);
-
-	    spdif_ptr = spdif_buf;
-	}
+    if (!s_spdif.started) {
+        ESP_LOGW(TAG, "spdif_write called while transmitter stopped");
+        return;
     }
+
+    if (size & 1) {
+        ESP_LOGW(TAG, "spdif_write size must be even, truncating trailing byte");
+        size -= 1;
+    }
+
+    if (size == 0) {
+        return;
+    }
+
+    const uint8_t *p = src;
+    const uint8_t *end = (const uint8_t *)src + size;
+    uint32_t *ptr = s_spdif.ptr;
+
+    while (p < end) {
+        *(ptr + 1) = (uint32_t)(((bmc_tab[*p] << 16) ^ bmc_tab[*(p + 1)]) << 1) >> 1;
+
+        p += 2;
+        ptr += 2;
+
+        if (ptr >= &spdif_buf[SPDIF_BUF_ARRAY_SIZE]) {
+            size_t i2s_write_len;
+
+            ((uint8_t *)spdif_buf)[SYNC_OFFSET] ^= SYNC_FLIP;
+
+            i2s_write(I2S_NUM, spdif_buf, sizeof(spdif_buf), &i2s_write_len, portMAX_DELAY);
+
+            ptr = spdif_buf;
+        }
+    }
+
+    s_spdif.ptr = ptr;
 }
 
 // change S/PDIF sample rate
 // Returns ESP_OK on success, or an error code on failure
 esp_err_t spdif_set_sample_rates(int rate)
 {
-    // uninstall and reinstall I2S driver for avoiding I2S bug
-    i2s_driver_uninstall(I2S_NUM);
-    return spdif_init(rate);
+    if (!s_spdif.initialized) {
+        ESP_LOGE(TAG, "Cannot change sample rate before initialization");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    bool was_started = s_spdif.started;
+    int pin = s_spdif.pin;
+
+    esp_err_t err = ESP_OK;
+
+    if (was_started) {
+        err = spdif_stop();
+        if (err != ESP_OK) {
+            return err;
+        }
+    }
+
+    err = i2s_driver_uninstall(I2S_NUM);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to uninstall I2S driver: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    s_spdif.initialized = false;
+    s_spdif.started = false;
+    s_spdif.ptr = spdif_buf;
+
+    err = spdif_init(rate, pin);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    if (was_started) {
+        err = spdif_start();
+        if (err != ESP_OK) {
+            return err;
+        }
+    }
+
+    return ESP_OK;
 }

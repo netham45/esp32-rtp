@@ -9,10 +9,9 @@
 #include "config/config_manager.h"
 #include "spdif_out.h"
 #include "usb_out.h"
-#include "usb/uac_host.h"
 
-// Device handle storage - only one will be used at a time based on mode
-static audio_device_handle_t audio_device_handle = NULL;
+// USB out component now manages its own device handle internally
+// We don't need to store the handle here anymore
 
 bool playing = true;
 
@@ -27,11 +26,11 @@ esp_err_t audio_out_update_volume(void) {
     device_mode_t mode = lifecycle_get_device_mode();
     
     if (mode == MODE_RECEIVER_USB) {
-        if (audio_device_handle != NULL && playing) {
+        if (usb_out_is_connected() && playing) {
             float new_volume = lifecycle_get_volume();
             ESP_LOGI(TAG, "Updating USB volume to %.2f", new_volume);
-            uac_host_device_handle_t usb_handle = (uac_host_device_handle_t)audio_device_handle;
-            return uac_host_device_set_volume(usb_handle, new_volume * 100.0f);
+            // usb_out_set_volume expects 0-100 range
+            return usb_out_set_volume(new_volume);
         }
     } else if (mode == MODE_RECEIVER_SPDIF) {
         // SPDIF doesn't support volume control directly
@@ -49,20 +48,15 @@ void resume_playback() {
     device_mode_t mode = lifecycle_get_device_mode();
     
     if (mode == MODE_RECEIVER_USB) {
-        // Only try to resume if we have a valid DAC handle
-        if (audio_device_handle != NULL) {
-            // Get current configuration from lifecycle manager
-            uac_host_stream_config_t stm_config = {
-                .channels = 2,
-                .bit_resolution = lifecycle_get_bit_depth(),
-                .sample_freq = lifecycle_get_sample_rate(),
-            };
+        // Check if USB device is connected
+        if (usb_out_is_connected()) {
+            // USB out component is already configured and started
+            // We just need to set the playing flag
             ESP_LOGI(TAG, "Resume Playback with USB DAC (SR: %" PRIu32 ", BD: %" PRIu8 ")",
                      lifecycle_get_sample_rate(), lifecycle_get_bit_depth());
             
-            uac_host_device_handle_t usb_handle = (uac_host_device_handle_t)audio_device_handle;
-            ESP_ERROR_CHECK(uac_host_device_start(usb_handle, &stm_config));
-            ESP_ERROR_CHECK(uac_host_device_set_volume(usb_handle, lifecycle_get_volume() * 100.0f));
+            // Update volume to current setting
+            usb_out_set_volume(lifecycle_get_volume());
             playing = true;
         } else {
             ESP_LOGI(TAG, "Cannot resume USB playback - No DAC connected");
@@ -78,13 +72,19 @@ void resume_playback() {
 }
 
 void start_playback(audio_device_handle_t device_handle) {
-    audio_device_handle = device_handle;
+    // With the refactored USB out component, we no longer need to store the handle
+    // The USB out component manages it internally
     
     device_mode_t mode = lifecycle_get_device_mode();
     ESP_LOGI(TAG, "Starting playback in mode: %d", mode);
     
     if (mode == MODE_RECEIVER_USB) {
-        ESP_LOGI(TAG, "USB receiver mode - device handle set");
+        ESP_LOGI(TAG, "USB receiver mode - checking connection");
+        if (usb_out_is_connected()) {
+            ESP_LOGI(TAG, "USB DAC connected and ready");
+        } else {
+            ESP_LOGW(TAG, "USB DAC not connected");
+        }
     } else if (mode == MODE_RECEIVER_SPDIF) {
         ESP_LOGI(TAG, "SPDIF receiver mode - ready for output");
     }
@@ -99,9 +99,8 @@ void stop_playback() {
     device_mode_t mode = lifecycle_get_device_mode();
     
     if (mode == MODE_RECEIVER_USB) {
-        if (audio_device_handle != NULL) {
-            uac_host_device_handle_t usb_handle = (uac_host_device_handle_t)audio_device_handle;
-            uac_host_device_stop(usb_handle);
+        if (usb_out_is_connected()) {
+            usb_out_stop_playback();
         }
     } else if (mode == MODE_RECEIVER_SPDIF) {
         // SPDIF doesn't need explicit stop
@@ -118,10 +117,9 @@ void audio_direct_write(uint8_t *data) {
     device_mode_t mode = lifecycle_get_device_mode();
     
     if (mode == MODE_RECEIVER_USB) {
-        // Check if we have a valid DAC handle before writing
-        if (audio_device_handle != NULL) {
-            uac_host_device_handle_t usb_handle = (uac_host_device_handle_t)audio_device_handle;
-            uac_host_device_write(usb_handle, data, PCM_CHUNK_SIZE, portMAX_DELAY);
+        // Check if USB device is connected before writing
+        if (usb_out_is_connected()) {
+            usb_out_write(data, PCM_CHUNK_SIZE, portMAX_DELAY);
         } else {
             // DAC is not connected - we should be in sleep mode
             ESP_LOGD(TAG, "Attempted USB write with no DAC");
@@ -154,9 +152,8 @@ void pcm_handler(void* pvParams) {
                 
                 // Process the audio data based on current mode
                 if (mode == MODE_RECEIVER_USB) {
-                    if (audio_device_handle != NULL) {
-                        uac_host_device_handle_t usb_handle = (uac_host_device_handle_t)audio_device_handle;
-                        uac_host_device_write(usb_handle, data, PCM_CHUNK_SIZE, portMAX_DELAY);
+                    if (usb_out_is_connected()) {
+                        usb_out_write(data, PCM_CHUNK_SIZE, portMAX_DELAY);
                     } else {
                         // DAC is not connected but we're trying to play - should enter sleep
                         ESP_LOGW(TAG, "PCM handler tried to write with no USB DAC");

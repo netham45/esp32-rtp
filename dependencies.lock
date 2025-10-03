@@ -76,10 +76,18 @@ dependencies:
     - esp32p4
     version: 0.2.0
   espressif/usb_host_uac:
-    dependencies: []
+    component_hash: 6bcac5e817b87e6d089574f2280d35eef2e761e387b667909c158238358d2a14
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=4.4'
     source:
-      path: C:\Users\Nathan\Documents\GitHub\esp32-rtp\components\espressif__usb_host_uac
-      type: local
+      registry_url: https://components.espressif.com/
+      type: service
+    targets:
+    - esp32s2
+    - esp32s3
+    - esp32p4
     version: 1.0.0
   idf:
     source:
@@ -99,6 +107,30 @@ dependencies:
     - esp32s3
     - esp32p4
     version: 0.16.0~6
+  netham45/spdif_in:
+    dependencies: []
+    source:
+      path: C:\Users\Nathan\Documents\GitHub\esp32-rtp\components\netham45__spdif_in
+      type: local
+    version: 1.0.0
+  netham45/spdif_out:
+    dependencies: []
+    source:
+      path: C:\Users\Nathan\Documents\GitHub\esp32-rtp\components\netham45__spdif_out
+      type: local
+    version: 1.0.0
+  netham45/usb_in:
+    dependencies: []
+    source:
+      path: C:\Users\Nathan\Documents\GitHub\esp32-rtp\components\netham45__usb_in
+      type: local
+    version: 1.0.0
+  netham45/usb_out:
+    dependencies: []
+    source:
+      path: C:\Users\Nathan\Documents\GitHub\esp32-rtp\components\netham45__usb_out
+      type: local
+    version: 1.0.0
 direct_dependencies:
 - cherry-embedded/cherryusb
 - espressif/esp-dsp
@@ -107,6 +139,10 @@ direct_dependencies:
 - espressif/usb_device_uac
 - espressif/usb_host_uac
 - idf
-manifest_hash: 7b951b396786124cbde96883ffea1b79b444c5ecc2d775bd150fb7573d764b8f
+- netham45/spdif_in
+- netham45/spdif_out
+- netham45/usb_in
+- netham45/usb_out
+manifest_hash: 19cf05f8d184b2bd84da6c4a26d2215d6f12b3851ba5dc2a412ebd8d0af53ef5
 target: esp32s3
 version: 2.0.0

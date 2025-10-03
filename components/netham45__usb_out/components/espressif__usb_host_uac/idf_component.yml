@@ -1,0 +1,14 @@
+dependencies:
+  idf:
+    version: '>=4.4'
+description: USB Host UAC driver
+repository: git://github.com/espressif/esp-usb.git
+repository_info:
+  commit_sha: 4e895b41082c9b9594a0bbd5b3b5cdec3621225e
+  path: host/class/uac/usb_host_uac
+targets:
+- esp32s2
+- esp32s3
+- esp32p4
+url: https://github.com/espressif/esp-usb/tree/master/host/class/uac/usb_host_uac
+version: 1.0.0

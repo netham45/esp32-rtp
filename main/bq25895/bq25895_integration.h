@@ -58,4 +58,14 @@ esp_err_t bq25895_integration_reset(void);
  */
 esp_err_t bq25895_integration_set_ce_pin(bool enable);
 
+/**
+ * @brief Read a BQ25895 register through the integration layer.
+ */
+esp_err_t bq25895_integration_read_register(uint8_t reg, uint8_t *value);
+
+/**
+ * @brief Write a BQ25895 register through the integration layer.
+ */
+esp_err_t bq25895_integration_write_register(uint8_t reg, uint8_t value);
+
 #endif // BQ25895_INTEGRATION_H

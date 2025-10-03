@@ -10,7 +10,7 @@
 
 #ifdef IS_SPDIF
 #include "spdif_in.h"
-#include "../receiver/spdif_out.h"
+#include "spdif_out.h"
 #endif
 
 #undef TAG
@@ -117,7 +117,7 @@ esp_err_t lifecycle_reconfig_spdif_pin(uint8_t new_pin) {
         
         // Reinitialize SPDIF with new pin
         ESP_LOGI(TAG, "Reinitializing SPDIF output with GPIO %d", new_pin);
-        ret = spdif_init(config->sample_rate);
+        ret = spdif_init(config->sample_rate, new_pin);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Failed to reinitialize SPDIF output: 0x%x", ret);
         } else {

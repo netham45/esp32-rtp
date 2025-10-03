@@ -24,7 +24,7 @@ extern "C" {
 #define PCM_BUFFER_SIZE         8192        // 8KB PCM ring buffer
 
 // External PCM buffer shared with network_out
-static RingbufHandle_t usb_in_pcm_buffer = NULL;
+extern RingbufHandle_t usb_in_pcm_buffer;
 
 // Public API functions
 esp_err_t usb_in_init(void (*init_done_cb)(void));

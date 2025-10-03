@@ -1,22 +1,16 @@
-#include "receiver/usb_out.h"
+#include "usb_out.h"
 #include "esp_err.h"
 #include "esp_log.h"
-#include "config.h"
-#include "build_config.h"
 
-#ifdef IS_USB
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
 #include "usb/usb_host.h"
 #include "usb/uac_host.h"
-#include "global.h"
-#include "receiver/audio_out.h"
-#include "config.h"
-#include "lifecycle_manager.h"
 #include <string.h>
 
 #define TAG "usb_out"
+#define PCM_CHUNK_SIZE USB_OUT_PCM_CHUNK_SIZE
 
 // Global USB speaker device handle (exposed for web_server.c power management)
 uac_host_device_handle_t s_spk_dev_handle = NULL;
@@ -67,6 +61,10 @@ typedef struct {
     TickType_t last_reconnect_time;
     bool device_enumeration_complete;
     TickType_t enumeration_start_time;
+    // Configuration parameters
+    uint32_t configured_sample_rate;
+    uint8_t configured_bit_depth;
+    float configured_volume;
 } usb_out_state_t;
 
 static usb_out_state_t s_usb_state = {
@@ -83,7 +81,10 @@ static usb_out_state_t s_usb_state = {
     .last_error_time = 0,
     .last_reconnect_time = 0,
     .device_enumeration_complete = false,
-    .enumeration_start_time = 0
+    .enumeration_start_time = 0,
+    .configured_sample_rate = 48000,
+    .configured_bit_depth = 16,
+    .configured_volume = 0.5f
 };
 
 typedef struct {
@@ -129,10 +130,10 @@ static void uac_device_callback(uac_host_device_handle_t uac_device_handle, cons
             ESP_LOGI(TAG, "Device parameters already saved for reconnection");
         }
         
-        // Stop audio player first
+        // Clear device handle
         s_usb_state.spk_dev_handle = NULL;
         s_spk_dev_handle = NULL;  // Update global handle for web_server.c
-        stop_playback();
+        // Note: External playback control should be handled by the caller
         
         // Close the device handle
         esp_err_t err = uac_host_device_close(uac_device_handle);
@@ -147,12 +148,11 @@ static void uac_device_callback(uac_host_device_handle_t uac_device_handle, cons
                      (unsigned long)(s_usb_state.reconnect_attempts + 1),
                      USB_RECONNECT_MAX_ATTEMPTS,
                      USB_RECONNECT_DELAY_MS);
-            vTaskDelay(pdMS_TO_TICKS(USB_RECONNECT_DELAY_MS));
-            
-            if (!is_playing()) {
-                s_usb_state.reconnect_attempts++;
-                usb_out_attempt_reconnection();
-            }
+                     vTaskDelay(pdMS_TO_TICKS(USB_RECONNECT_DELAY_MS));
+                     
+                     // Always attempt reconnection if within limits
+                     s_usb_state.reconnect_attempts++;
+                     usb_out_attempt_reconnection();
         } else {
             ESP_LOGW(TAG, "Maximum reconnection attempts reached (%d), giving up",
                      USB_RECONNECT_MAX_ATTEMPTS);
@@ -285,15 +285,15 @@ static void uac_lib_task(void *arg)
                                     ESP_LOGW(TAG, "Failed to get device info: %s", esp_err_to_name(err));
                                 }
                                 
-                                // Configure the audio stream using lifecycle manager
+                                // Configure the audio stream using internal configuration
                                 uac_host_stream_config_t stm_config = {
                                     .channels = 2,
-                                    .bit_resolution = lifecycle_get_bit_depth(),
-                                    .sample_freq = lifecycle_get_sample_rate(),
+                                    .bit_resolution = s_usb_state.configured_bit_depth,
+                                    .sample_freq = s_usb_state.configured_sample_rate,
                                 };
                                 
                                 ESP_LOGI(TAG, "Starting device with SR: %lu Hz, BD: %d bits",
-                                         (unsigned long)lifecycle_get_sample_rate(), lifecycle_get_bit_depth());
+                                         (unsigned long)s_usb_state.configured_sample_rate, s_usb_state.configured_bit_depth);
                                 
                                 // Start the device with the stream configuration
                                 err = uac_host_device_start(uac_device_handle, &stm_config);
@@ -301,11 +301,11 @@ static void uac_lib_task(void *arg)
                                     // Save device parameters for potential reconnection after sleep
                                     usb_out_save_device_params(addr, iface_num, &stm_config);
                                     
-                                    // Set volume from lifecycle manager
-                                    float volume_percent = lifecycle_get_volume() * 100.0f;
+                                    // Set volume from internal configuration
+                                    float volume_percent = s_usb_state.configured_volume * 100.0f;
                                     err = uac_host_device_set_volume(uac_device_handle, volume_percent);
                                     if (err == ESP_OK) {
-                                        ESP_LOGI(TAG, "Volume set to %.0f%%", volume_percent / 100.0f);
+                                        ESP_LOGI(TAG, "Volume set to %.0f%%", volume_percent);
                                     } else {
                                         ESP_LOGW(TAG, "Failed to set volume: %s", esp_err_to_name(err));
                                     }
@@ -317,9 +317,7 @@ static void uac_lib_task(void *arg)
                                     s_usb_state.reconnect_attempts = 0;  // Reset reconnection counter on success
                                     usb_out_reset_error_counters();
                                     ESP_LOGI(TAG, "USB audio device ready for playback");
-
-                                    // Start playback (this will set the audio_device_handle and playing flag)
-                                    start_playback((audio_device_handle_t)uac_device_handle);
+                                    // Note: External playback control should be handled by the caller
                                 } else {
                                     ESP_LOGE(TAG, "Failed to start UAC device: %s", esp_err_to_name(err));
                                     // Close the device if we couldn't start it
@@ -446,7 +444,7 @@ esp_err_t usb_out_init(void) {
     return ESP_OK;
 }
 
-esp_err_t usb_out_start(void) {
+esp_err_t usb_out_start(uint32_t sample_rate, uint8_t bit_depth, float initial_volume) {
     if (!s_usb_state.initialized) {
         ESP_LOGE(TAG, "USB output not initialized, call usb_out_init() first");
         return ESP_ERR_INVALID_STATE;
@@ -457,7 +455,13 @@ esp_err_t usb_out_start(void) {
         return ESP_OK;
     }
     
-    ESP_LOGI(TAG, "Starting USB output tasks");
+    // Store configuration parameters
+    s_usb_state.configured_sample_rate = sample_rate;
+    s_usb_state.configured_bit_depth = bit_depth;
+    s_usb_state.configured_volume = initial_volume;
+    
+    ESP_LOGI(TAG, "Starting USB output tasks with SR=%lu Hz, BD=%d bits, Vol=%.2f",
+             (unsigned long)sample_rate, bit_depth, initial_volume);
     
     esp_err_t err = ESP_OK;
     int init_retry = 0;
@@ -616,6 +620,8 @@ esp_err_t usb_out_set_volume(float volume) {
     
     esp_err_t err = uac_host_device_set_volume(s_usb_state.spk_dev_handle, volume_percent);
     if (err == ESP_OK) {
+        // Update internal configuration
+        s_usb_state.configured_volume = volume / 100.0f;
         ESP_LOGI(TAG, "Volume set to %.1f%%", volume);
     } else {
         ESP_LOGE(TAG, "Failed to set volume: %s", esp_err_to_name(err));
@@ -635,8 +641,8 @@ esp_err_t usb_out_get_volume(float *volume) {
     }
     
     // Note: UAC host library doesn't provide a get_volume function
-    // Return the last set volume from lifecycle manager
-    *volume = lifecycle_get_volume() * 100.0f;
+    // Return the last set volume from internal configuration
+    *volume = s_usb_state.configured_volume * 100.0f;
     ESP_LOGD(TAG, "Current volume from config: %.1f%%", *volume);
     
     return ESP_OK;
@@ -782,17 +788,15 @@ static esp_err_t usb_out_restore_device(void) {
         return err;
     }
     
-    // Restore volume from lifecycle manager
-    float volume_percent = lifecycle_get_volume() * 100.0f;
+    // Restore volume from internal configuration
+    float volume_percent = s_usb_state.configured_volume * 100.0f;
     uac_host_device_set_volume(uac_device_handle, volume_percent);
     
     // Save the device handle and start playback
     s_usb_state.spk_dev_handle = uac_device_handle;
     s_spk_dev_handle = uac_device_handle;  // Update global handle for web_server.c
     ESP_LOGI(TAG, "USB device restored successfully");
-
-    // Start playback (this will set the audio_device_handle and playing flag)
-    start_playback((audio_device_handle_t)uac_device_handle);
+    // Note: External playback control should be handled by the caller
     
     return ESP_OK;
 }
@@ -805,9 +809,7 @@ esp_err_t usb_out_prepare_for_sleep(void) {
     }
     
     ESP_LOGI(TAG, "Preparing USB device for sleep mode");
-    
-    // Stop playback
-    stop_playback();
+    // Note: External playback control should be handled by the caller
     
     // Stop the device but keep it open
     esp_err_t err = uac_host_device_stop(s_usb_state.spk_dev_handle);
@@ -839,12 +841,10 @@ esp_err_t usb_out_restore_after_wake(void) {
         return err;
     }
     
-    // Restore volume from lifecycle manager
-    float volume_percent = lifecycle_get_volume() * 100.0f;
+    // Restore volume from internal configuration
+    float volume_percent = s_usb_state.configured_volume * 100.0f;
     uac_host_device_set_volume(s_usb_state.spk_dev_handle, volume_percent);
-    
-    // Resume playback
-    resume_playback();
+    // Note: External playback control should be handled by the caller
     
     ESP_LOGI(TAG, "USB device restored after wake");
     return ESP_OK;
@@ -984,58 +984,3 @@ esp_err_t usb_out_check_enumeration_timeout(void) {
     
     return ESP_ERR_NOT_FOUND;  // Still waiting
 }
-
-#else // IS_USB
-
-#define TAG "usb_out"
-
-esp_err_t usb_out_init(void) {
-    ESP_LOGI(TAG, "USB support is not enabled in this build.");
-    return ESP_OK;
-}
-
-esp_err_t usb_out_start(void) {
-    ESP_LOGI(TAG, "USB support is not enabled in this build.");
-    return ESP_OK;
-}
-
-esp_err_t usb_out_stop(void) {
-    ESP_LOGI(TAG, "USB support is not enabled in this build.");
-    return ESP_OK;
-}
-
-uac_host_device_handle_t usb_out_get_device_handle(void) {
-    return NULL;
-}
-
-bool usb_out_is_connected(void) {
-    return false;
-}
-
-esp_err_t usb_out_deinit(void) {
-    ESP_LOGI(TAG, "USB support is not enabled in this build.");
-    return ESP_OK;
-}
-
-esp_err_t usb_out_set_volume(float volume) {
-    ESP_LOGI(TAG, "USB support is not enabled in this build.");
-    return ESP_OK;
-}
-
-esp_err_t usb_out_get_volume(float *volume) {
-    ESP_LOGI(TAG, "USB support is not enabled in this build.");
-    if (volume) *volume = 0.0f;
-    return ESP_OK;
-}
-
-esp_err_t usb_out_write(const uint8_t *data, size_t size, TickType_t timeout) {
-    ESP_LOGI(TAG, "USB support is not enabled in this build.");
-    return ESP_OK;
-}
-
-esp_err_t usb_out_stop_playback(void) {
-    ESP_LOGI(TAG, "USB support is not enabled in this build.");
-    return ESP_OK;
-}
-
-#endif // IS_USB

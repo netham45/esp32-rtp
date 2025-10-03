@@ -11,13 +11,13 @@
 #include "esp_log.h"
 
 #ifdef IS_USB
-#include "../sender/usb_in.h"
-#include "../receiver/usb_out.h"
+#include "usb_in.h"
+#include "usb_out.h"
 #endif
 
 #ifdef IS_SPDIF
 #include "spdif_in.h"
-#include "../receiver/spdif_out.h"
+#include "spdif_out.h"
 #endif
 
 #undef TAG
@@ -260,8 +260,13 @@ static esp_err_t start_mode_receiver_usb(void) {
         return ret;
     }
 
-    // Start USB host for DAC output
-    ret = usb_out_start();
+    // Get audio parameters from lifecycle manager
+    uint32_t sample_rate = lifecycle_get_sample_rate();
+    uint8_t bit_depth = lifecycle_get_bit_depth();
+    float volume = lifecycle_get_volume() * 100.0f; // Convert to percentage
+
+    // Start USB host for DAC output with audio parameters
+    ret = usb_out_start(sample_rate, bit_depth, volume);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to start USB host: %s", esp_err_to_name(ret));
         return ret;
@@ -341,9 +346,20 @@ static esp_err_t start_mode_receiver_spdif(void) {
         spdif_data_pin, sample_rate);
         
     heap_caps_print_heap_info(MALLOC_CAP_INTERNAL);
-    esp_err_t err = spdif_init(sample_rate);
+    esp_err_t err = spdif_init(sample_rate, spdif_data_pin);
     if (err == ESP_OK) {
         ESP_LOGI(TAG, "SPDIF initialized successfully");
+        
+        // Start the SPDIF transmitter
+        err = spdif_start();
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "SPDIF transmitter started successfully");
+        } else {
+            ESP_LOGE(TAG, "Failed to start SPDIF transmitter: %s", esp_err_to_name(err));
+            ESP_LOGW(TAG, "Audio output will not be available. SPDIF initialized but not started.");
+            // Cleanup on failure
+            spdif_deinit();
+        }
     } else {
         ESP_LOGE(TAG, "Failed to initialize SPDIF: %s", esp_err_to_name(err));
         ESP_LOGW(TAG, "Audio output will not be available. Please check the SPDIF pin configuration in the web UI.");
@@ -403,8 +419,19 @@ static esp_err_t stop_mode_receiver_spdif(void) {
     }
     
     #ifdef IS_SPDIF
-    // TODO: Stop network, buffer, and S/PDIF output properly
-    // For now, these don't have clean stop functions
+    // Stop and deinitialize S/PDIF output
+    ret = spdif_stop();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to stop S/PDIF output: %s", esp_err_to_name(ret));
+    }
+    
+    ret = spdif_deinit();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to deinitialize S/PDIF output: %s", esp_err_to_name(ret));
+    }
+    
+    ESP_LOGI(TAG, "S/PDIF output stopped and deinitialized");
+    // TODO: Stop network and buffer tasks properly
     #endif
     return ESP_OK;
 }

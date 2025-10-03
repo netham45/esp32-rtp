@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BQ25895 Battery Charger Configuration</title>
+    <link rel="stylesheet" href="/bq25895/css">
+</head>
+<body>
+    <div class="container">
+        <h1>BQ25895 Battery Charger Configuration</h1>
+
+        <div class="status-container">
+            <h2>Status</h2>
+            <div class="status-grid">
+                <div class="status-item">
+                    <span class="label">Battery Voltage:</span>
+                    <span id="bat-voltage" class="value">--</span>
+                </div>
+                <div class="status-item">
+                    <span class="label">System Voltage:</span>
+                    <span id="sys-voltage" class="value">--</span>
+                </div>
+                <div class="status-item">
+                    <span class="label">VBUS Voltage:</span>
+                    <span id="vbus-voltage" class="value">--</span>
+                </div>
+                <div class="status-item">
+                    <span class="label">Charge Current:</span>
+                    <span id="charge-current" class="value">--</span>
+                </div>
+                <div class="status-item">
+                    <span class="label">Charging Status:</span>
+                    <span id="charging-status" class="value">--</span>
+                </div>
+                <div class="status-item">
+                    <span class="label">VBUS Status:</span>
+                    <span id="vbus-status" class="value">--</span>
+                </div>
+                <div class="status-item">
+                    <span class="label">Power Good:</span>
+                    <span id="power-good" class="value">--</span>
+                </div>
+                <div class="status-item">
+                    <span class="label">Thermal Status:</span>
+                    <span id="thermal-status" class="value">--</span>
+                </div>
+            </div>
+            <div class="status-grid">
+                <div class="status-item">
+                    <span class="label">Watchdog Fault:</span>
+                    <span id="watchdog-fault" class="value">--</span>
+                </div>
+                <div class="status-item">
+                    <span class="label">Boost Fault:</span>
+                    <span id="boost-fault" class="value">--</span>
+                </div>
+                <div class="status-item">
+                    <span class="label">Charge Fault:</span>
+                    <span id="charge-fault" class="value">--</span>
+                </div>
+                <div class="status-item">
+                    <span class="label">Battery Fault:</span>
+                    <span id="battery-fault" class="value">--</span>
+                </div>
+                <div class="status-item">
+                    <span class="label">NTC Fault:</span>
+                    <span id="ntc-fault" class="value">--</span>
+                </div>
+            </div>
+            <button id="refresh-status" class="btn">Refresh Status</button>
+            <div class="ce-pin-control">
+                <h3>CE Pin Control (IO12)</h3>
+                <p>The CE pin is active low. When low, charging is enabled. When high, charging is disabled.</p>
+                <div class="button-group">
+                    <button type="button" id="ce-pin-enable" class="btn">Enable Charging (CE=Low)</button>
+                    <button type="button" id="ce-pin-disable" class="btn">Disable Charging (CE=High)</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="config-container">
+            <h2>Configuration</h2>
+            <form id="config-form">
+                <div class="form-group">
+                    <label for="charge-voltage">Charge Voltage (mV):</label>
+                    <input type="number" id="charge-voltage" min="3840" max="4608" step="16">
+                </div>
+                <div class="form-group">
+                    <label for="charge-current">Charge Current (mA):</label>
+                    <input type="number" id="charge-current-input" min="0" max="5056" step="64">
+                </div>
+                <div class="form-group">
+                    <label for="input-current-limit">Input Current Limit (mA):</label>
+                    <input type="number" id="input-current-limit" min="100" max="3250" step="50">
+                </div>
+                <div class="form-group">
+                    <label for="input-voltage-limit">Input Voltage Limit (mV):</label>
+                    <input type="number" id="input-voltage-limit" min="3900" max="14000" step="100">
+                </div>
+                <div class="form-group">
+                    <label for="precharge-current">Precharge Current (mA):</label>
+                    <input type="number" id="precharge-current" min="64" max="1024" step="64">
+                </div>
+                <div class="form-group">
+                    <label for="termination-current">Termination Current (mA):</label>
+                    <input type="number" id="termination-current" min="64" max="1024" step="64">
+                </div>
+                <div class="form-group">
+                    <label for="boost-voltage">Boost Voltage (mV):</label>
+                    <input type="number" id="boost-voltage" min="4550" max="5510" step="64">
+                </div>
+                <div class="form-group">
+                    <label for="thermal-regulation">Thermal Regulation (°C):</label>
+                    <select id="thermal-regulation">
+                        <option value="60">60°C</option>
+                        <option value="80">80°C</option>
+                        <option value="100">100°C</option>
+                        <option value="120">120°C</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="fast-charge-timer">Fast Charge Timer (hours):</label>
+                    <select id="fast-charge-timer">
+                        <option value="5">5 hours</option>
+                        <option value="8">8 hours</option>
+                        <option value="12">12 hours</option>
+                        <option value="20">20 hours</option>
+                    </select>
+                </div>
+                <div class="form-group checkbox">
+                    <input type="checkbox" id="enable-charging">
+                    <label for="enable-charging">Enable Charging</label>
+                </div>
+                <div class="form-group checkbox">
+                    <input type="checkbox" id="enable-otg">
+                    <label for="enable-otg">Enable OTG Mode</label>
+                </div>
+                <div class="form-group checkbox">
+                    <input type="checkbox" id="enable-termination">
+                    <label for="enable-termination">Enable Termination</label>
+                </div>
+                <div class="form-group checkbox">
+                    <input type="checkbox" id="enable-safety-timer">
+                    <label for="enable-safety-timer">Enable Safety Timer</label>
+                </div>
+                <div class="form-group checkbox">
+                    <input type="checkbox" id="enable-hi-impedance">
+                    <label for="enable-hi-impedance">Enable Hi-Z Mode</label>
+                </div>
+                <div class="form-group checkbox">
+                    <input type="checkbox" id="enable-ir-compensation">
+                    <label for="enable-ir-compensation">Enable IR Compensation</label>
+                </div>
+                <div class="form-group">
+                    <label for="ir-compensation-mohm">IR Compensation (mOhm):</label>
+                    <input type="number" id="ir-compensation-mohm" min="0" max="140" step="20">
+                </div>
+                <div class="form-group">
+                    <label for="ir-compensation-voltage">IR Compensation Voltage (mV):</label>
+                    <input type="number" id="ir-compensation-voltage" min="0" max="224" step="32">
+                </div>
+                <div class="button-group">
+                    <button type="button" id="load-config" class="btn">Load Configuration</button>
+                    <button type="submit" class="btn primary">Save Configuration</button>
+                    <button type="button" id="reset-device" class="btn danger">Reset Device</button>
+                </div>
+            </form>
+        </div>
+
+        <div class="register-container">
+            <h2>Register Access</h2>
+            <p>Read and write arbitrary registers for advanced configuration and debugging.</p>
+            <div class="register-controls">
+                <div class="form-group">
+                    <label for="register-address">Register Address (hex):</label>
+                    <input type="text" id="register-address" placeholder="0x00" maxlength="4">
+                </div>
+                <div class="form-group">
+                    <label for="register-value">Register Value (hex):</label>
+                    <input type="text" id="register-value" placeholder="0x00" maxlength="4">
+                </div>
+                <div class="button-group">
+                    <button type="button" id="read-register" class="btn">Read Register</button>
+                    <button type="button" id="write-register" class="btn primary">Write Register</button>
+                </div>
+            </div>
+            <div class="register-result">
+                <h3>Result:</h3>
+                <pre id="register-result">No operation performed yet.</pre>
+            </div>
+        </div>
+    </div>
+    <script src="/bq25895/js"></script>
+</body>
+</html>

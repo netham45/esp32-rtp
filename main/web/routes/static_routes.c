@@ -24,6 +24,13 @@ extern const uint8_t sap_html_start[] asm("_binary_sap_html_start");
 extern const uint8_t sap_html_end[] asm("_binary_sap_html_end");
 extern const uint8_t sap_js_start[] asm("_binary_sap_js_start");
 extern const uint8_t sap_js_end[] asm("_binary_sap_js_end");
+// BQ25895 files
+extern const uint8_t bq25895_html_start[] asm("_binary_bq25895_html_start");
+extern const uint8_t bq25895_html_end[] asm("_binary_bq25895_html_end");
+extern const uint8_t bq25895_css_start[] asm("_binary_bq25895_css_start");
+extern const uint8_t bq25895_css_end[] asm("_binary_bq25895_css_end");
+extern const uint8_t bq25895_js_start[] asm("_binary_bq25895_js_start");
+extern const uint8_t bq25895_js_end[] asm("_binary_bq25895_js_end");
 
 /**
  * GET handler for the root page (index.html)
@@ -156,6 +163,38 @@ static esp_err_t sap_js_handler(httpd_req_t *req)
 }
 
 /**
+ * GET handler for BQ25895 HTML page
+ */
+static esp_err_t bq25895_html_handler(httpd_req_t *req)
+{
+    ESP_LOGI(TAG, "Handling GET request for /bq25895");
+    size_t html_size = bq25895_html_end - bq25895_html_start;
+    return send_html_chunked(req, (const char *)bq25895_html_start, html_size);
+}
+
+/**
+ * GET handler for BQ25895 CSS
+ */
+static esp_err_t bq25895_css_handler(httpd_req_t *req)
+{
+    ESP_LOGI(TAG, "Handling GET request for /bq25895/css");
+    httpd_resp_set_type(req, "text/css");
+    size_t css_size = bq25895_css_end - bq25895_css_start;
+    return httpd_resp_send(req, (const char *)bq25895_css_start, css_size);
+}
+
+/**
+ * GET handler for BQ25895 JavaScript
+ */
+static esp_err_t bq25895_js_handler(httpd_req_t *req)
+{
+    ESP_LOGI(TAG, "Handling GET request for /bq25895/js");
+    httpd_resp_set_type(req, "application/javascript");
+    size_t js_size = bq25895_js_end - bq25895_js_start;
+    return httpd_resp_send(req, (const char *)bq25895_js_start, js_size);
+}
+
+/**
  * Register all static content routes
  */
 esp_err_t register_static_routes(httpd_handle_t server)
@@ -237,6 +276,45 @@ esp_err_t register_static_routes(httpd_handle_t server)
     ret = httpd_register_uri_handler(server, &wizard_js_uri);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to register /wizard.js handler");
+        return ret;
+    }
+
+    // Register BQ25895 HTML
+    httpd_uri_t bq25895_html = {
+        .uri = "/bq25895",
+        .method = HTTP_GET,
+        .handler = bq25895_html_handler,
+        .user_ctx = NULL
+    };
+    ret = httpd_register_uri_handler(server, &bq25895_html);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to register /bq25895 handler");
+        return ret;
+    }
+
+    // Register BQ25895 CSS
+    httpd_uri_t bq25895_css = {
+        .uri = "/bq25895/css",
+        .method = HTTP_GET,
+        .handler = bq25895_css_handler,
+        .user_ctx = NULL
+    };
+    ret = httpd_register_uri_handler(server, &bq25895_css);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to register /bq25895/css handler");
+        return ret;
+    }
+
+    // Register BQ25895 JavaScript
+    httpd_uri_t bq25895_js = {
+        .uri = "/bq25895/js",
+        .method = HTTP_GET,
+        .handler = bq25895_js_handler,
+        .user_ctx = NULL
+    };
+    ret = httpd_register_uri_handler(server, &bq25895_js);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to register /bq25895/js handler");
         return ret;
     }
 

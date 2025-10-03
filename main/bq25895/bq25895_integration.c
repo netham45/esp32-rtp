@@ -5,7 +5,6 @@
 
 #include "bq25895_integration.h"
 #include "bq25895/bq25895.h"
-#include "bq25895/bq25895_web.h"
 #include "esp_log.h"
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
@@ -181,14 +180,7 @@ esp_err_t bq25895_integration_init(void)
         ESP_LOGE(TAG, "Failed to set default charge parameters: %s", esp_err_to_name(ret));
         return ret;
     }
-    
-    // Initialize BQ25895 web interface
-    ret = bq25895_web_init();
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to initialize BQ25895 web interface: %s", esp_err_to_name(ret));
-        return ret;
-    }
-    
+
     ESP_LOGI(TAG, "BQ25895 integration initialized successfully");
     return ESP_OK;
 }
@@ -254,4 +246,18 @@ esp_err_t bq25895_integration_set_ce_pin(bool enable)
     
     ESP_LOGI(TAG, "BQ25895 CE pin set to %d (charging %s)", level, enable ? "enabled" : "disabled");
     return ESP_OK;
+}
+
+esp_err_t bq25895_integration_read_register(uint8_t reg, uint8_t *value)
+{
+    if (value == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    return bq25895_read_reg((bq25895_reg_t)reg, value);
+}
+
+esp_err_t bq25895_integration_write_register(uint8_t reg, uint8_t value)
+{
+    return bq25895_write_reg((bq25895_reg_t)reg, value);
 }

@@ -6,6 +6,9 @@ set(WEB_FILES
     "${WEB_SRC_DIR}/script.js"
     "${WEB_SRC_DIR}/spdif_stats.html"
     "${WEB_SRC_DIR}/spdif_stats.js"
+    "${WEB_SRC_DIR}/bq25895.html"
+    "${WEB_SRC_DIR}/bq25895.css"
+    "${WEB_SRC_DIR}/bq25895.js"
     "${WEB_SRC_DIR}/wizard.js"
     "${WEB_SRC_DIR}/wizard.html"
     "${WEB_SRC_DIR}/wizard.css"
@@ -32,7 +35,7 @@ set(WEB_ROUTES_SRCS
 # BQ25895 battery charger files
 set(BQ25895_SRCS
     "bq25895/bq25895.c"
-    "bq25895/bq25895_web.c"
+    "bq25895/bq25895_json.c"
     "bq25895/bq25895_integration.c"
 )
 
@@ -58,17 +61,11 @@ set(LIFECYCLE_SRCS
     "lifecycle/state_machine.c"
 )
 
-set(SENDER_SRCS
-    "sender/usb_in.c"
-)
-
 set (RECEIVER_SRCS
     "receiver/audio_out.c"
     "receiver/buffer.c"
     "receiver/network_in.c"
     "receiver/sap_listener.c"
-    "receiver/spdif_out.c"
-    "receiver/usb_out.c"
 )
 
 # Visualizer module files
@@ -94,7 +91,6 @@ idf_component_register(SRCS "esp32-rtp.c"
                            ${OTA_SRCS}
                            ${LOGGING_SRCS}
                            ${LIFECYCLE_SRCS}
-                           ${SENDER_SRCS}
                            ${RECEIVER_SRCS}
                            ${VISUALIZER_SRCS}
                       INCLUDE_DIRS "."

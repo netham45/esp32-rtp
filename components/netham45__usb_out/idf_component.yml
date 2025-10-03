@@ -1,0 +1,18 @@
+dependencies:
+  idf:
+    version: '>=5.4'
+  espressif/usb_host_uac:
+    version: 1.0.*
+    rules:
+    - if: target in [esp32s2, esp32s3, esp32p4]
+description: USB UAC 1.0 Host Output Driver
+repository: git://github.com/netham45/esp32-usb-out
+repository_info:
+  commit_sha: 000000000000000000000000000000000000000e
+  path: usb-out/
+targets:
+- esp32s2
+- esp32s3
+- esp32p4
+url: https://github.com/netham45/esp32-usb-out
+version: 1.0.0

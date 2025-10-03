@@ -76,7 +76,13 @@ static void handle_state_entry(lifecycle_state_t state) {
             break;
         }
         case LIFECYCLE_STATE_AWAITING_MODE_CONFIG: {
-            // Nothing to do on entry - wait for configuration
+            // Don't block the state machine task with delays
+            // Instead, immediately check if we can transition
+            ESP_LOGI(TAG, "Entered AWAITING_MODE_CONFIG, checking for immediate transition");
+            
+            // For sender modes that don't require WiFi, transition immediately
+            // For receiver modes, wait for WiFi connection event
+            evaluate_and_transition();
             break;
         }
         case LIFECYCLE_STATE_MODE_SENDER_USB:
