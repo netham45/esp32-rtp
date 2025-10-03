@@ -219,12 +219,10 @@ esp_err_t lifecycle_set_volume(float volume) {
         esp_err_t ret = config_manager_save_setting("volume", &volume, sizeof(volume));
         if (ret == ESP_OK) {
             // Apply volume change immediately if in receiver USB mode
-            #ifdef IS_USB
             lifecycle_state_t state = lifecycle_get_current_state();
             if (state == LIFECYCLE_STATE_MODE_RECEIVER_USB) {
                 audio_out_update_volume();
             }
-            #endif
             // Post event for notification
             lifecycle_manager_post_event(LIFECYCLE_EVENT_CONFIGURATION_CHANGED);
         }
@@ -254,13 +252,7 @@ esp_err_t lifecycle_set_enable_usb_sender(bool enable) {
     if (enable) {
         new_mode = MODE_SENDER_USB;
     } else {
-        #ifdef IS_USB
         new_mode = MODE_RECEIVER_USB;
-        #elif defined(IS_SPDIF)
-        new_mode = MODE_RECEIVER_SPDIF;
-        #else
-        new_mode = MODE_RECEIVER_USB;  // Default fallback
-        #endif
     }
     if (config->device_mode != new_mode) {
         ESP_LOGI(TAG, "Setting USB sender enabled to %d (device_mode=%d)", enable, new_mode);
@@ -281,13 +273,7 @@ esp_err_t lifecycle_set_enable_spdif_sender(bool enable) {
     if (enable) {
         new_mode = MODE_SENDER_SPDIF;
     } else {
-        #ifdef IS_USB
         new_mode = MODE_RECEIVER_USB;
-        #elif defined(IS_SPDIF)
-        new_mode = MODE_RECEIVER_SPDIF;
-        #else
-        new_mode = MODE_RECEIVER_USB;  // Default fallback
-        #endif
     }
     if (config->device_mode != new_mode) {
         ESP_LOGI(TAG, "Setting SPDIF sender enabled to %d (device_mode=%d)", enable, new_mode);
@@ -665,24 +651,12 @@ esp_err_t lifecycle_update_config_batch(const lifecycle_config_update_t* updates
         if (updates->update_enable_usb_sender) {
             resolved_mode = updates->enable_usb_sender
                 ? MODE_SENDER_USB
-#ifdef IS_USB
                 : MODE_RECEIVER_USB
-#elif defined(IS_SPDIF)
-                : MODE_RECEIVER_SPDIF
-#else
-                : MODE_RECEIVER_USB
-#endif
             ;
         } else if (updates->update_enable_spdif_sender) {
             resolved_mode = updates->enable_spdif_sender
                 ? MODE_SENDER_SPDIF
-#ifdef IS_USB
                 : MODE_RECEIVER_USB
-#elif defined(IS_SPDIF)
-                : MODE_RECEIVER_SPDIF
-#else
-                : MODE_RECEIVER_USB
-#endif
             ;
         }
     }
@@ -728,12 +702,9 @@ esp_err_t lifecycle_update_config_batch(const lifecycle_config_update_t* updates
         config->volume = updates->volume;
     }
 
-#ifdef IS_SPDIF
-    // SPDIF pin (guarded by build flag)
     if (updates->update_spdif_data_pin) {
         config->spdif_data_pin = updates->spdif_data_pin;
     }
-#endif
 
     // Sender settings
     if (updates->update_sender_destination_ip && updates->sender_destination_ip) {
@@ -973,12 +944,10 @@ bool lifecycle_config_handle_configuration_changed(void) {
         ESP_LOGI(TAG, "Volume changed from %.2f to %.2f",
                  previous_config.volume, current_config->volume);
         any_changes = true;
-#ifdef IS_USB
         if (state == LIFECYCLE_STATE_MODE_RECEIVER_USB) {
             ESP_LOGI(TAG, "Applying volume change immediately");
             audio_out_update_volume();
         }
-#endif
     }
 
     // Direct write changes

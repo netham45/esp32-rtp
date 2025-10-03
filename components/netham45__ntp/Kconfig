@@ -1,0 +1,33 @@
+menu "NTP / DNS"
+    config DNS_MDNS_PORT
+        int "mDNS UDP port"
+        default 5353
+
+    config DNS_MDNS_IPV4_ADDRESS
+        string "mDNS multicast IPv4 address"
+        default "224.0.0.251"
+
+    config NTP_SERVER_PORT
+        int "NTP server port"
+        default 123
+
+    config NTP_QUERY_TARGET
+        string "NTP/DNS query target (hostname)"
+        default "screamrouter.local"
+
+    config NTP_HISTORY_SIZE
+        int "NTP history size"
+        default 25
+
+    config NTP_POLL_INTERVAL_MS
+        int "NTP poll interval (ms)"
+        default 500
+
+    config NTP_FAST_POLL_INTERVAL_MS
+        int "NTP fast poll interval (ms)"
+        default 50
+
+    config NTP_MAX_FAILURE_COUNT
+        int "Max consecutive failures before cache invalidation"
+        default 3
+endmenu

@@ -157,15 +157,6 @@ static void evaluate_and_transition(void) {
     
     // Log the current configuration
     ESP_LOGI(TAG, "========== CURRENT CONFIGURATION ==========");
-    ESP_LOGI(TAG, "Build type: %s",
-        #ifdef IS_USB
-            "USB"
-        #elif defined(IS_SPDIF)
-            "S/PDIF"
-        #else
-            "UNKNOWN"
-        #endif
-    );
     ESP_LOGI(TAG, "Device mode: %d", config->device_mode);
     ESP_LOGI(TAG, "Sample rate: %d Hz", config->sample_rate);
     ESP_LOGI(TAG, "Bit depth: %d bits", config->bit_depth);

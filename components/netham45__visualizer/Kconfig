@@ -1,0 +1,70 @@
+menu "Visualizer"
+
+    config VIZ_CHUNK_SIZE
+        int "Visualizer chunk size (bytes)"
+        default 1152
+
+    config VIZ_RING_SIZE
+        int "Visualizer ring size (bytes)"
+        default 4608
+
+    config VIZ_WINDOW_SIZE
+        int "Visualizer RMS window size (samples)"
+        default 1024
+
+    config VIZ_ATTACK_COEFF_MPCT
+        int "Attack coefficient (milli-percent, 1000=1.0)"
+        default 200
+
+    config VIZ_RELEASE_COEFF_MPCT
+        int "Release coefficient (milli-percent, 1000=1.0)"
+        default 30
+
+    config VIZ_PEAK_HOLD_MS
+        int "Peak hold (ms)"
+        default 1500
+
+    config VIZ_PPM_MIN_DB_TENTHS
+        int "PPM min dB (tenths)"
+        default -400
+
+    config VIZ_PPM_MAX_DB_TENTHS
+        int "PPM max dB (tenths)"
+        default 0
+
+    config VIZ_PPM_DB_RANGE_TENTHS
+        int "PPM dB range (tenths)"
+        default 400
+
+    config VIZ_PPM_OVERLOAD_DB_TENTHS
+        int "PPM overload threshold dB (tenths)"
+        default -30
+
+    config VIZ_PPM_DECAY_DB_PER_SEC_TENTHS
+        int "PPM decay dB/s (tenths)"
+        default 250
+
+    config VIZ_SMOOTH_COEFF_MPCT
+        int "Smoothing coefficient (milli-percent, 1000=1.0)"
+        default 300
+
+    config VIZ_AUTO_GAIN_MIN_MPCT
+        int "Auto-gain min (milli-percent)"
+        default 500
+
+    config VIZ_AUTO_GAIN_MAX_MPCT
+        int "Auto-gain max (milli-percent)"
+        default 4000
+
+    config VIZ_AUTO_GAIN_TARGET_MPCT
+        int "Auto-gain target (milli-percent)"
+        default 800
+
+    config VIZ_AUTO_GAIN_ADJUST_RATE_MPCT
+        int "Auto-gain adjust rate per second (milli-percent)"
+        default 50
+
+    config VIZ_AUTO_GAIN_WINDOW_MS
+        int "Auto-gain window (ms)"
+        default 1000
+endmenu

@@ -7,3 +7,4 @@ dependencies:
   netham45/usb_out: '*'
   netham45/bq25895: '*'
   netham45/visualizer: '*'
+  netham45/ntp: '*'

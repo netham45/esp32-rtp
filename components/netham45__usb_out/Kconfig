@@ -1,0 +1,41 @@
+menu "USB Out"
+    config USB_HOST_TASK_PRIO
+        int "USB host task priority"
+        default 5
+
+    config USB_HOST_TASK_STACK
+        int "USB host task stack size"
+        default 4096
+
+    config UAC_TASK_PRIO
+        int "UAC task priority"
+        default 5
+
+    config UAC_TASK_STACK
+        int "UAC task stack size"
+        default 4096
+
+    config USB_ENUMERATION_TIMEOUT_MS
+        int "USB enumeration timeout (ms)"
+        default 5000
+
+    config USB_TRANSFER_RETRY_COUNT
+        int "USB transfer retry count"
+        default 3
+
+    config USB_TRANSFER_RETRY_DELAY_MS
+        int "USB transfer initial retry delay (ms)"
+        default 100
+
+    config USB_RECONNECT_DELAY_MS
+        int "USB reconnect base delay (ms)"
+        default 2000
+
+    config USB_RECONNECT_MAX_ATTEMPTS
+        int "USB reconnect max attempts"
+        default 5
+
+    config USB_INIT_MAX_RETRIES
+        int "USB host init max retries"
+        default 3
+endmenu

@@ -36,7 +36,7 @@ typedef struct {
     uint32_t sample_rate;
     uint8_t bit_depth;
     float volume;
-    uint8_t spdif_data_pin;  // Only used when IS_SPDIF is defined
+    uint8_t spdif_data_pin; 
     
     // Sleep configuration
     uint32_t silence_threshold_ms;

@@ -10,15 +10,11 @@
 #include "../config/config_manager.h"
 #include "esp_log.h"
 
-#ifdef IS_USB
 #include "usb_in.h"
 #include "usb_out.h"
-#endif
 
-#ifdef IS_SPDIF
 #include "spdif_in.h"
 #include "spdif_out.h"
-#endif
 
 #undef TAG
 #define TAG "lifecycle_modes"
@@ -75,7 +71,6 @@ esp_err_t lifecycle_mode_stop(lifecycle_state_t mode) {
 
 static esp_err_t start_mode_sender_usb(void) {
     ESP_LOGI(TAG, "Starting USB sender mode...");
-    #ifdef IS_USB
     // Initialize network sender first (reads from pcm_buffer)
     heap_caps_print_heap_info(MALLOC_CAP_INTERNAL);
     esp_err_t ret = rtp_sender_init();
@@ -124,15 +119,10 @@ static esp_err_t start_mode_sender_usb(void) {
     
     ESP_LOGI(TAG, "USB sender mode started successfully (USB audio -> RTP)");
     return ESP_OK;
-    #else
-    ESP_LOGW(TAG, "USB support not enabled in build");
-    return ESP_ERR_NOT_SUPPORTED;
-    #endif
 }
 
 static esp_err_t stop_mode_sender_usb(void) {
     ESP_LOGI(TAG, "Stopping USB sender mode...");
-    #ifdef IS_USB
     // Stop RTP sender first
     esp_err_t ret = visualizer_deinit();
     if (ret != ESP_OK) {
@@ -155,16 +145,12 @@ static esp_err_t stop_mode_sender_usb(void) {
     
     ESP_LOGI(TAG, "USB sender mode stopped");
     return ESP_OK;
-    #else
-    return ESP_ERR_NOT_SUPPORTED;
-    #endif
 }
 
 // ==================== SPDIF Sender Mode ====================
 
 static esp_err_t start_mode_sender_spdif(void) {
     ESP_LOGI(TAG, "Starting S/PDIF sender mode...");
-    #ifdef IS_SPDIF
     ESP_LOGI(TAG, "Initializing Scream sender");
     heap_caps_print_heap_info(MALLOC_CAP_INTERNAL);
     esp_err_t ret = rtp_sender_init();
@@ -196,15 +182,10 @@ static esp_err_t start_mode_sender_spdif(void) {
     }
     ESP_LOGI(TAG, "S/PDIF sender mode started successfully");
     return ESP_OK;
-    #else
-    ESP_LOGW(TAG, "S/PDIF support not enabled in build");
-    return ESP_ERR_NOT_SUPPORTED;
-    #endif
 }
 
 static esp_err_t stop_mode_sender_spdif(void) {
     ESP_LOGI(TAG, "Stopping S/PDIF sender mode...");
-    #ifdef IS_SPDIF
     esp_err_t ret = rtp_sender_stop();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to stop Scream sender: %s", esp_err_to_name(ret));
@@ -218,16 +199,12 @@ static esp_err_t stop_mode_sender_spdif(void) {
         ESP_LOGE(TAG, "Failed to stop visualizer: %s", esp_err_to_name(ret));
     }
     return ESP_OK;
-    #else
-    return ESP_ERR_NOT_SUPPORTED;
-    #endif
 }
 
 // ==================== USB Receiver Mode ====================
 
 static esp_err_t start_mode_receiver_usb(void) {
     ESP_LOGI(TAG, "Starting USB receiver mode...");
-    #ifdef IS_USB
     // Setup audio output first
     setup_audio();
 
@@ -284,15 +261,10 @@ static esp_err_t start_mode_receiver_usb(void) {
     
     ESP_LOGI(TAG, "USB receiver mode started successfully");
     return ESP_OK;
-    #else
-    ESP_LOGW(TAG, "USB support not enabled in build");
-    return ESP_ERR_NOT_SUPPORTED;
-    #endif
 }
 
 static esp_err_t stop_mode_receiver_usb(void) {
     ESP_LOGI(TAG, "Stopping USB receiver mode...");
-    #ifdef IS_USB
     
     // Stop visualizer first
     esp_err_t ret = visualizer_deinit();
@@ -324,9 +296,6 @@ static esp_err_t stop_mode_receiver_usb(void) {
     // TODO: Stop network and audio tasks properly
     // For now, these don't have clean stop functions
     return ESP_OK;
-    #else
-    return ESP_ERR_NOT_SUPPORTED;
-    #endif
 }
 
 // ==================== SPDIF Receiver Mode ====================
@@ -418,7 +387,6 @@ static esp_err_t stop_mode_receiver_spdif(void) {
         ESP_LOGE(TAG, "Failed to deinitialize SAP listener: %s", esp_err_to_name(ret));
     }
     
-    #ifdef IS_SPDIF
     // Stop and deinitialize S/PDIF output
     ret = spdif_stop();
     if (ret != ESP_OK) {
@@ -432,6 +400,5 @@ static esp_err_t stop_mode_receiver_spdif(void) {
     
     ESP_LOGI(TAG, "S/PDIF output stopped and deinitialized");
     // TODO: Stop network and buffer tasks properly
-    #endif
     return ESP_OK;
 }

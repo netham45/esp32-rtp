@@ -25,9 +25,7 @@ extern "C" {
  * - {{DEVICE_NAME}} - Device name
  * - {{CURRENT_SSID}} - Currently connected WiFi SSID
  * - {{CONNECTION_STATUS}} - WiFi connection status with IP
- * - {{#IS_SPDIF}} ... {{/IS_SPDIF}} - Conditional sections for SPDIF
- * - {{#IS_USB}} ... {{/IS_USB}} - Conditional sections for USB
- * 
+
  * @param req HTTP request structure
  * @param html_start Pointer to the start of HTML content
  * @param html_size Size of HTML content in bytes

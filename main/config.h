@@ -30,12 +30,5 @@
 #define SILENCE_AMPLITUDE_THRESHOLD 10   // Audio amplitude below this is considered silent (0-32767)
 #define NETWORK_INACTIVITY_TIMEOUT_MS 5000 // Enter sleep mode after no packets for 5 seconds
 
-// Feature bridge: keep legacy macros aligned with Kconfig feature toggles
-#if CONFIG_FEATURE_SPDIF
-#define IS_SPDIF
-#endif
-#if CONFIG_FEATURE_USB
-#define IS_USB
-#endif
 
 #define TAG "scream_receiver"

@@ -136,13 +136,7 @@ static void set_default_config(void) {
     s_app_config.sap_stream_name[0] = '\0';          // No stream selected by default
 
     // Device mode defaults based on build type
-    #ifdef IS_USB
-    s_app_config.device_mode = MODE_RECEIVER_USB;
-    #elif defined(IS_SPDIF)
-    s_app_config.device_mode = MODE_RECEIVER_SPDIF;
-    #else
     s_app_config.device_mode = MODE_RECEIVER_USB; // Default fallback
-    #endif
 }
 
 /**
@@ -362,16 +356,8 @@ esp_err_t config_manager_init(void) {
             ESP_LOGI(TAG, "Derived device_mode from legacy: MODE_SENDER_SPDIF");
         } else {
             // Default to receiver mode based on build type
-            #ifdef IS_USB
             s_app_config.device_mode = MODE_RECEIVER_USB;
             ESP_LOGI(TAG, "Derived device_mode from legacy: MODE_RECEIVER_USB");
-            #elif defined(IS_SPDIF)
-            s_app_config.device_mode = MODE_RECEIVER_SPDIF;
-            ESP_LOGI(TAG, "Derived device_mode from legacy: MODE_RECEIVER_SPDIF");
-            #else
-            s_app_config.device_mode = MODE_RECEIVER_USB;
-            ESP_LOGI(TAG, "Derived device_mode from legacy: MODE_RECEIVER_USB (fallback)");
-            #endif
         }
     }
     

@@ -8,10 +8,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-#ifdef IS_SPDIF
 #include "spdif_in.h"
 #include "spdif_out.h"
-#endif
 
 #undef TAG
 #define TAG "lifecycle_reconfig"
@@ -46,18 +44,12 @@ esp_err_t lifecycle_reconfig_sample_rate(uint32_t new_rate) {
     
     // Reconfigure based on current mode
     if (current_state == LIFECYCLE_STATE_MODE_RECEIVER_USB) {
-        #ifdef IS_USB
         ESP_LOGI(TAG, "Reconfiguring USB audio output for sample rate %lu Hz", new_rate);
         // Note: USB audio typically handles sample rate changes automatically
         // If a specific reconfiguration function exists, call it here
         // For now, we rely on the USB audio subsystem to adapt
         ESP_LOGI(TAG, "USB audio will adapt to new sample rate on resume");
-        #else
-        ESP_LOGW(TAG, "USB support not enabled in build");
-        ret = ESP_ERR_NOT_SUPPORTED;
-        #endif
     } else if (current_state == LIFECYCLE_STATE_MODE_RECEIVER_SPDIF) {
-        #ifdef IS_SPDIF
         ESP_LOGI(TAG, "Reconfiguring SPDIF output for sample rate %lu Hz", new_rate);
         ret = spdif_set_sample_rates((int)new_rate);
         if (ret != ESP_OK) {
@@ -65,10 +57,6 @@ esp_err_t lifecycle_reconfig_sample_rate(uint32_t new_rate) {
         } else {
             ESP_LOGI(TAG, "SPDIF sample rate reconfigured successfully");
         }
-        #else
-        ESP_LOGW(TAG, "SPDIF support not enabled in build");
-        ret = ESP_ERR_NOT_SUPPORTED;
-        #endif
     }
     
     // Resume audio output
@@ -101,7 +89,6 @@ esp_err_t lifecycle_reconfig_spdif_pin(uint8_t new_pin) {
     
     esp_err_t ret = ESP_OK;
     
-    #ifdef IS_SPDIF
     if (current_state == LIFECYCLE_STATE_MODE_RECEIVER_SPDIF) {
         ESP_LOGI(TAG, "Reconfiguring SPDIF receiver output pin");
         
@@ -163,10 +150,6 @@ esp_err_t lifecycle_reconfig_spdif_pin(uint8_t new_pin) {
             }
         }
     }
-    #else
-    ESP_LOGW(TAG, "SPDIF support not enabled in build");
-    ret = ESP_ERR_NOT_SUPPORTED;
-    #endif
     
     if (ret == ESP_OK) {
         ESP_LOGI(TAG, "SPDIF pin reconfiguration completed successfully");

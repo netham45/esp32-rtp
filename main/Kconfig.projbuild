@@ -46,30 +46,6 @@ config SAP_BUFFER_SIZE
     default 1024
 endmenu
 
-menu "Power: BQ25895"
-config BQ25895_I2C_ADDR
-    hex "BQ25895 I2C address"
-    default 0x6A
-config BQ25895_I2C_PORT
-    int "I2C port number"
-    range 0 1
-    default 0
-config BQ25895_SDA_GPIO
-    int "I2C SDA GPIO"
-    default 8
-config BQ25895_SCL_GPIO
-    int "I2C SCL GPIO"
-    default 9
-config BQ25895_I2C_FREQ_HZ
-    int "I2C frequency (Hz)"
-    default 100000
-config BQ25895_OTG_GPIO
-    int "OTG control GPIO"
-    default 13
-config BQ25895_DEFAULT_BOOST_MV
-    int "Default boost voltage (mV)"
-    default 5000
-endmenu
 
 menu "Features"
 config FEATURE_USB
@@ -78,65 +54,6 @@ config FEATURE_USB
 config FEATURE_SPDIF
     bool "Enable SPDIF sender/receiver"
     default y
-endmenu
-
-menu "USB Out"
-depends on FEATURE_USB
-config USB_HOST_TASK_PRIO
-    int "USB host task priority"
-    default 5
-config USB_HOST_TASK_STACK
-    int "USB host task stack size"
-    default 4096
-config UAC_TASK_PRIO
-    int "UAC task priority"
-    default 5
-config UAC_TASK_STACK
-    int "UAC task stack size"
-    default 4096
-config USB_ENUMERATION_TIMEOUT_MS
-    int "USB enumeration timeout (ms)"
-    default 5000
-config USB_TRANSFER_RETRY_COUNT
-    int "USB transfer retry count"
-    default 3
-config USB_TRANSFER_RETRY_DELAY_MS
-    int "USB transfer initial retry delay (ms)"
-    default 100
-config USB_RECONNECT_DELAY_MS
-    int "USB reconnect base delay (ms)"
-    default 2000
-config USB_RECONNECT_MAX_ATTEMPTS
-    int "USB reconnect max attempts"
-    default 5
-config USB_INIT_MAX_RETRIES
-    int "USB host init max retries"
-    default 3
-endmenu
-
-menu "SPDIF In"
-depends on FEATURE_SPDIF
-config SPDIF_RMT_RES_HZ
-    int "RMT resolution (Hz)"
-    default 80000000
-config SPDIF_RMT_MEM_BLOCK_SYMBOLS
-    int "RMT mem block symbols"
-    default 8192
-config SPDIF_SYMBOL_BUFFER_SIZE
-    int "Symbol buffer size (bytes)"
-    default 8192
-config SPDIF_PCM_BUFFER_SIZE
-    int "PCM buffer size (bytes)"
-    default 4096
-config SPDIF_DECODER_TASK_STACK
-    int "Decoder task stack (bytes)"
-    default 4096
-config SPDIF_DECODER_TASK_PRIORITY
-    int "Decoder task priority"
-    default 10
-config SPDIF_MIN_SAMPLES_FOR_ANALYSIS
-    int "Min samples before analysis"
-    default 10000
 endmenu
 
 menu "mDNS Discovery"
@@ -151,32 +68,6 @@ config MDNS_MAX_DEVICES
     default 16
 endmenu
 
-menu "NTP / DNS"
-config DNS_MDNS_PORT
-    int "mDNS UDP port"
-    default 5353
-config DNS_MDNS_IPV4_ADDRESS
-    string "mDNS multicast IPv4 address"
-    default "224.0.0.251"
-config NTP_SERVER_PORT
-    int "NTP server port"
-    default 123
-config NTP_QUERY_TARGET
-    string "NTP/DNS query target (hostname)"
-    default "screamrouter.local"
-config NTP_HISTORY_SIZE
-    int "NTP history size"
-    default 25
-config NTP_POLL_INTERVAL_MS
-    int "NTP poll interval (ms)"
-    default 500
-config NTP_FAST_POLL_INTERVAL_MS
-    int "NTP fast poll interval (ms)"
-    default 50
-config NTP_MAX_FAILURE_COUNT
-    int "Max consecutive failures before cache invalidation"
-    default 3
-endmenu
 
 menu "WiFi"
 config WIFI_AP_CHANNEL
@@ -191,58 +82,5 @@ config WIFI_CONNECTION_TIMEOUT_MS
     default 10000
 endmenu
 
-menu "Visualizer"
-config VIZ_CHUNK_SIZE
-    int "Visualizer chunk size (bytes)"
-    default 1152
-config VIZ_RING_SIZE
-    int "Visualizer ring size (bytes)"
-    default 4608
-config VIZ_WINDOW_SIZE
-    int "Visualizer RMS window size (samples)"
-    default 1024
-config VIZ_ATTACK_COEFF_MPCT
-    int "Attack coefficient (milli-percent, 1000=1.0)"
-    default 200
-config VIZ_RELEASE_COEFF_MPCT
-    int "Release coefficient (milli-percent, 1000=1.0)"
-    default 30
-config VIZ_PEAK_HOLD_MS
-    int "Peak hold (ms)"
-    default 1500
-config VIZ_PPM_MIN_DB_TENTHS
-    int "PPM min dB (tenths)"
-    default -400
-config VIZ_PPM_MAX_DB_TENTHS
-    int "PPM max dB (tenths)"
-    default 0
-config VIZ_PPM_DB_RANGE_TENTHS
-    int "PPM dB range (tenths)"
-    default 400
-config VIZ_PPM_OVERLOAD_DB_TENTHS
-    int "PPM overload threshold dB (tenths)"
-    default -30
-config VIZ_PPM_DECAY_DB_PER_SEC_TENTHS
-    int "PPM decay dB/s (tenths)"
-    default 250
-config VIZ_SMOOTH_COEFF_MPCT
-    int "Smoothing coefficient (milli-percent, 1000=1.0)"
-    default 300
-config VIZ_AUTO_GAIN_MIN_MPCT
-    int "Auto-gain min (milli-percent)"
-    default 500
-config VIZ_AUTO_GAIN_MAX_MPCT
-    int "Auto-gain max (milli-percent)"
-    default 4000
-config VIZ_AUTO_GAIN_TARGET_MPCT
-    int "Auto-gain target (milli-percent)"
-    default 800
-config VIZ_AUTO_GAIN_ADJUST_RATE_MPCT
-    int "Auto-gain adjust rate per second (milli-percent)"
-    default 50
-config VIZ_AUTO_GAIN_WINDOW_MS
-    int "Auto-gain window (ms)"
-    default 1000
-endmenu
 
 endmenu

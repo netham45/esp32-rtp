@@ -1,0 +1,54 @@
+menu "USB In"
+
+config USB_IN_SAMPLE_RATE
+    int "USB input sample rate (Hz)"
+    default 48000
+    help
+        Sample rate for audio frames received from the host.
+
+config USB_IN_CHANNEL_COUNT
+    int "USB input channel count"
+    default 2
+    range 1 8
+    help
+        Number of PCM channels delivered over USB audio.
+
+config USB_IN_BIT_DEPTH
+    int "USB input bit depth"
+    default 16
+    range 8 32
+    help
+        Bits per PCM sample; must be divisible by 8.
+
+config USB_IN_CHUNK_SIZE
+    int "USB transfer chunk size (bytes)"
+    default 1152
+    help
+        Number of bytes read per USB isochronous transfer.
+
+config USB_IN_BUFFER_SIZE
+    int "USB internal buffer size (bytes)"
+    default 2304
+    help
+        Size of the internal staging buffer before data is written to the PCM ring buffer.
+
+config USB_IN_PCM_BUFFER_SIZE
+    int "PCM ring buffer size (bytes)"
+    default 8192
+    help
+        Capacity of the FreeRTOS ring buffer storing PCM audio.
+
+config USB_IN_TASK_STACK_SIZE
+    int "USB audio task stack size (bytes)"
+    default 4096
+    help
+        Stack size for the USB audio monitoring task.
+
+config USB_IN_TASK_PRIORITY
+    int "USB audio task priority"
+    default 5
+    range 0 25
+    help
+        Priority assigned to the USB audio monitoring task.
+
+endmenu

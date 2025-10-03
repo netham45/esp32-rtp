@@ -108,15 +108,6 @@ esp_err_t lifecycle_hw_init_dac_detection(void) {
     
     // Log configuration at initialization
     ESP_LOGI(TAG, "========== CONFIGURATION AT HW_INIT ==========");
-    ESP_LOGI(TAG, "Build configuration: %s",
-        #ifdef IS_USB
-            "IS_USB"
-        #elif defined(IS_SPDIF)
-            "IS_SPDIF"
-        #else
-            "UNDEFINED"
-        #endif
-    );
     ESP_LOGI(TAG, "device_mode: %d", config->device_mode);
     ESP_LOGI(TAG, "sample_rate: %d", config->sample_rate);
     ESP_LOGI(TAG, "spdif_data_pin: %d", config->spdif_data_pin);
@@ -128,7 +119,6 @@ esp_err_t lifecycle_hw_init_dac_detection(void) {
         return ESP_OK;
     }
 
-    #ifdef IS_USB
     // LAZY USB INITIALIZATION: Skip DAC detection to save memory
     // USB host will be initialized only when actually needed in USB receiver mode
     // This saves ~30KB of heap memory for buffer allocation
@@ -145,9 +135,6 @@ esp_err_t lifecycle_hw_init_dac_detection(void) {
     // Note: Deep sleep for DAC detection is disabled with lazy initialization
     // If deep sleep behavior is still desired, implement a lightweight USB detection
     // method that doesn't require full USB host initialization
-    #else
-    ESP_LOGI(TAG, "Not a USB build, no DAC detection needed");
-    #endif
 
     return ESP_OK;
 }

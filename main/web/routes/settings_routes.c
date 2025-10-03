@@ -57,10 +57,7 @@ static esp_err_t settings_get_handler(httpd_req_t *req)
     cJSON_AddBoolToObject(root, "enable_usb_sender", mode == MODE_SENDER_USB);
     cJSON_AddBoolToObject(root, "enable_spdif_sender", mode == MODE_SENDER_SPDIF);
 
-    // SPDIF settings (only relevant when IS_SPDIF is defined)
-#ifdef IS_SPDIF
     cJSON_AddNumberToObject(root, "spdif_data_pin", lifecycle_get_spdif_data_pin());
-#endif
 
     // Sender settings
     cJSON_AddStringToObject(root, "sender_destination_ip", lifecycle_get_sender_destination_ip());
@@ -96,17 +93,9 @@ static esp_err_t settings_get_handler(httpd_req_t *req)
     }
 
     // Device capabilities (compile-time flags)
-#ifdef IS_USB
     cJSON_AddBoolToObject(root, "has_usb_capability", true);
-#else
-    cJSON_AddBoolToObject(root, "has_usb_capability", false);
-#endif
 
-#ifdef IS_SPDIF
     cJSON_AddBoolToObject(root, "has_spdif_capability", true);
-#else
-    cJSON_AddBoolToObject(root, "has_spdif_capability", false);
-#endif
 
     // Convert JSON to string
     char *json_str = cJSON_Print(root);
@@ -325,7 +314,6 @@ static esp_err_t settings_post_handler(httpd_req_t *req)
     }
 
     // SPDIF settings
-#ifdef IS_SPDIF
     cJSON *spdif_data_pin = cJSON_GetObjectItem(root, "spdif_data_pin");
     if (spdif_data_pin && cJSON_IsNumber(spdif_data_pin)) {
         // Limit the pin number to valid GPIO range (0-39 for ESP32)
@@ -335,10 +323,8 @@ static esp_err_t settings_post_handler(httpd_req_t *req)
             updates.spdif_data_pin = pin;
         }
     }
-#endif
 
     // Legacy SPDIF sender setting (for backward compatibility)
-#ifdef IS_SPDIF
     cJSON *enable_spdif_sender = cJSON_GetObjectItem(root, "enable_spdif_sender");
     if (enable_spdif_sender && cJSON_IsBool(enable_spdif_sender)) {
         if (!device_mode) {  // Only use if device_mode wasn't provided
@@ -347,7 +333,6 @@ static esp_err_t settings_post_handler(httpd_req_t *req)
             ESP_LOGI(TAG, "Updating S/PDIF sender enabled to: %d", updates.enable_spdif_sender);
         }
     }
-#endif
 
     // Handle direct write setting
     cJSON *use_direct_write = cJSON_GetObjectItem(root, "use_direct_write");

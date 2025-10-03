@@ -1,16 +1,16 @@
 dependencies:
   idf:
     version: '>=5.4'
-description: bq25895 i2c driver
+description: NTP client
 kconfig_file: "Kconfig"
-repository: git://github.com/netham45/esp32-bq25895
+repository: git://github.com/netham45/esp32-ntp
 repository_info:
   commit_sha: 000000000000000000000000000000000000000e
-  path: bq25895/
+  path: ntp/
 targets:
 - esp32s2
 - esp32s3
 - esp32p4
 - esp32
-url: https://github.com/netham45/esp32-bq25895
+url: https://github.com/netham45/esp32-ntp
 version: 1.0.0

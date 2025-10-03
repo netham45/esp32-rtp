@@ -131,53 +131,6 @@ esp_err_t send_html_chunked(httpd_req_t *req, const char* html_start, size_t htm
             chunk_size = before_len + strlen(status) + after_len;
         }
         
-        // Handle conditional sections for SPDIF and USB
-        // Simplified: Remove or keep sections based on compile flags
-#ifdef IS_SPDIF
-        // Keep SPDIF sections - just remove the tags
-        while ((pos = strstr(chunk_buffer, "{{#IS_SPDIF}}")) != NULL) {
-            memmove(pos, pos + strlen("{{#IS_SPDIF}}"), strlen(pos + strlen("{{#IS_SPDIF}}")) + 1);
-            chunk_size -= strlen("{{#IS_SPDIF}}");
-        }
-        while ((pos = strstr(chunk_buffer, "{{/IS_SPDIF}}")) != NULL) {
-            memmove(pos, pos + strlen("{{/IS_SPDIF}}"), strlen(pos + strlen("{{/IS_SPDIF}}")) + 1);
-            chunk_size -= strlen("{{/IS_SPDIF}}");
-        }
-#else
-        // Remove SPDIF sections entirely
-        {
-            char *start_tag, *end_tag;
-            while ((start_tag = strstr(chunk_buffer, "{{#IS_SPDIF}}")) != NULL &&
-                   (end_tag = strstr(start_tag, "{{/IS_SPDIF}}")) != NULL) {
-                end_tag += strlen("{{/IS_SPDIF}}");
-                memmove(start_tag, end_tag, strlen(end_tag) + 1);
-                chunk_size -= (end_tag - start_tag);
-            }
-        }
-#endif
-
-#ifdef IS_USB
-        // Keep USB sections - just remove the tags
-        while ((pos = strstr(chunk_buffer, "{{#IS_USB}}")) != NULL) {
-            memmove(pos, pos + strlen("{{#IS_USB}}"), strlen(pos + strlen("{{#IS_USB}}")) + 1);
-            chunk_size -= strlen("{{#IS_USB}}");
-        }
-        while ((pos = strstr(chunk_buffer, "{{/IS_USB}}")) != NULL) {
-            memmove(pos, pos + strlen("{{/IS_USB}}"), strlen(pos + strlen("{{/IS_USB}}")) + 1);
-            chunk_size -= strlen("{{/IS_USB}}");
-        }
-#else
-        // Remove USB sections entirely
-        {
-            char *start_tag, *end_tag;
-            while ((start_tag = strstr(chunk_buffer, "{{#IS_USB}}")) != NULL &&
-                   (end_tag = strstr(start_tag, "{{/IS_USB}}")) != NULL) {
-                end_tag += strlen("{{/IS_USB}}");
-                memmove(start_tag, end_tag, strlen(end_tag) + 1);
-                chunk_size -= (end_tag - start_tag);
-            }
-        }
-#endif
         
         // Send this chunk
         ret = httpd_resp_send_chunk(req, chunk_buffer, chunk_size);

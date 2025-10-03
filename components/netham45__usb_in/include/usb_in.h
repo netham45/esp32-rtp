@@ -1,6 +1,7 @@
 #ifndef USB_IN_H
 #define USB_IN_H
 
+#include "sdkconfig.h"
 #include "esp_err.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/ringbuf.h"
@@ -13,15 +14,15 @@ extern "C" {
 #endif
 
 // USB Audio configuration constants
-#define USB_SAMPLE_RATE         48000      // 48kHz sample rate
-#define USB_CHANNEL_NUM         2           // Stereo
-#define USB_BIT_DEPTH           16          // 16-bit audio
-#define USB_BYTES_PER_SAMPLE    2           // 2 bytes per sample (16-bit)
-#define USB_CHUNK_SIZE          1152        // Matches network packet size
-#define USB_BUFFER_SIZE         (USB_CHUNK_SIZE * 2)  // 8 chunks buffered
-#define USB_TASK_STACK_SIZE     4096        // 4KB stack for USB task
-#define USB_TASK_PRIORITY       5          // High priority for audio
-#define PCM_BUFFER_SIZE         8192        // 8KB PCM ring buffer
+#define USB_SAMPLE_RATE         CONFIG_USB_IN_SAMPLE_RATE
+#define USB_CHANNEL_NUM         CONFIG_USB_IN_CHANNEL_COUNT
+#define USB_BIT_DEPTH           CONFIG_USB_IN_BIT_DEPTH
+#define USB_BYTES_PER_SAMPLE    (USB_BIT_DEPTH / 8)
+#define USB_CHUNK_SIZE          CONFIG_USB_IN_CHUNK_SIZE
+#define USB_BUFFER_SIZE         CONFIG_USB_IN_BUFFER_SIZE
+#define USB_TASK_STACK_SIZE     CONFIG_USB_IN_TASK_STACK_SIZE
+#define USB_TASK_PRIORITY       CONFIG_USB_IN_TASK_PRIORITY
+#define PCM_BUFFER_SIZE         CONFIG_USB_IN_PCM_BUFFER_SIZE
 
 // External PCM buffer shared with network_out
 extern RingbufHandle_t usb_in_pcm_buffer;

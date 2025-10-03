@@ -1,0 +1,30 @@
+menu "Power: BQ25895"
+    config BQ25895_I2C_ADDR
+        hex "BQ25895 I2C address"
+        default 0x6A
+
+    config BQ25895_I2C_PORT
+        int "I2C port number"
+        range 0 1
+        default 0
+
+    config BQ25895_SDA_GPIO
+        int "I2C SDA GPIO"
+        default 8
+
+    config BQ25895_SCL_GPIO
+        int "I2C SCL GPIO"
+        default 9
+
+    config BQ25895_I2C_FREQ_HZ
+        int "I2C frequency (Hz)"
+        default 100000
+
+    config BQ25895_OTG_GPIO
+        int "OTG control GPIO"
+        default 13
+
+    config BQ25895_DEFAULT_BOOST_MV
+        int "Default boost voltage (mV)"
+        default 5000
+endmenu

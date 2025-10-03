@@ -6,6 +6,7 @@ dependencies:
     rules:
     - if: target in [esp32s2, esp32s3, esp32p4]
 description: USB UAC 1.0 Host Output Driver
+kconfig_file: "Kconfig"
 repository: git://github.com/netham45/esp32-usb-out
 repository_info:
   commit_sha: 000000000000000000000000000000000000000e

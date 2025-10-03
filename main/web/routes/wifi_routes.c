@@ -8,10 +8,8 @@
 #include "cJSON.h"
 #include <string.h>
 
-#ifdef IS_USB
 #include "usb/uac_host.h"
 extern uac_host_device_handle_t s_spk_dev_handle; // DAC handle from usb_audio_player_main.c
-#endif
 
 static const char *TAG = "wifi_routes";
 
@@ -204,7 +202,6 @@ static esp_err_t connect_post_handler(httpd_req_t *req)
     if (first_time_config) {
         ESP_LOGI(TAG, "First-time WiFi configuration detected");
 
-#ifdef IS_USB
         // Check if a DAC is connected (s_spk_dev_handle is NULL when no DAC is connected)
         if (s_spk_dev_handle == NULL) {
             ESP_LOGI(TAG, "No DAC connected after initial WiFi setup, preparing for deep sleep");
@@ -214,10 +211,6 @@ static esp_err_t connect_post_handler(httpd_req_t *req)
         } else {
             ESP_LOGI(TAG, "DAC is connected, staying awake after WiFi setup");
         }
-#else
-        // If USB support is not enabled, we don't check for DAC
-        ESP_LOGI(TAG, "USB support not enabled, staying awake after WiFi setup");
-#endif
     }
 
     return ESP_OK;

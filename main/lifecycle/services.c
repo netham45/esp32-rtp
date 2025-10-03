@@ -6,10 +6,8 @@
 #include "../web/web_server.h"
 #include "../mdns/mdns_discovery.h"
 #include "../mdns/mdns_service.h"
-#include "../ntp/ntp_client.h"
-#ifdef IS_SPDIF
+#include "ntp_client.h"
 #include "spdif_in.h"
-#endif
 #include "esp_log.h"
 
 esp_err_t lifecycle_services_init_wifi(void) {
@@ -50,7 +48,6 @@ esp_err_t lifecycle_services_init_web_server(void) {
 }
 
 esp_err_t lifecycle_services_init_spdif_receiver(void) {
-    #ifdef IS_SPDIF
     app_config_t *config = config_manager_get_config();
     if (config->device_mode == MODE_SENDER_SPDIF) {
         ESP_LOGI(TAG, "Initializing S/PDIF receiver with pin %d", config->spdif_data_pin);
@@ -61,7 +58,6 @@ esp_err_t lifecycle_services_init_spdif_receiver(void) {
             return ret;
         }
     }
-    #endif
     return ESP_OK;
 }
 
