@@ -23,7 +23,7 @@
 #include "esp_log.h"
 #include "buffer.h"
 #include "config/config_manager.h"
-#include "visualizer/pcm_visualizer.h"  // For pcm_viz_write
+#include "pcm_visualizer.h"  // For pcm_viz_write
 
 // RTP header structure (12 bytes) - matches sender format
 typedef struct __attribute__((packed)) {

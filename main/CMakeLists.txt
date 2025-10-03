@@ -32,13 +32,6 @@ set(WEB_ROUTES_SRCS
     "web/routes/routes.c"
 )
 
-# BQ25895 battery charger files
-set(BQ25895_SRCS
-    "bq25895/bq25895.c"
-    "bq25895/bq25895_json.c"
-    "bq25895/bq25895_integration.c"
-)
-
 # OTA manager files
 set(OTA_SRCS
     "ota/ota_manager.c"
@@ -68,13 +61,6 @@ set (RECEIVER_SRCS
     "receiver/sap_listener.c"
 )
 
-# Visualizer module files
-set(VISUALIZER_SRCS
-    "visualizer/pcm_visualizer.c"
-    "visualizer/led_strip_controller.c"
-    "visualizer/visualizer_task.c"
-)
-
 idf_component_register(SRCS "esp32-rtp.c"
                            "lifecycle_manager.c"
                            "config/config_manager.c"
@@ -87,12 +73,10 @@ idf_component_register(SRCS "esp32-rtp.c"
                            "wifi/wifi_manager.c"
                            "TS3USB30ERSWR/usb_switch.c"
                            ${WEB_ROUTES_SRCS}
-                           ${BQ25895_SRCS}
                            ${OTA_SRCS}
                            ${LOGGING_SRCS}
                            ${LIFECYCLE_SRCS}
                            ${RECEIVER_SRCS}
-                           ${VISUALIZER_SRCS}
                       INCLUDE_DIRS "."
                       EMBED_FILES ${WEB_FILES})
 

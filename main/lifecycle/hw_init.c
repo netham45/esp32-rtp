@@ -3,7 +3,7 @@
 #include "../global.h"
 #include "../config/config_manager.h"
 #include "../ota/ota_manager.h"
-#include "../bq25895/bq25895_integration.h"
+#include "bq25895_integration.h"
 #include "nvs_flash.h"
 #include "esp_pm.h"
 #include "esp_log.h"

@@ -3,7 +3,6 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "esp_err.h"
-#include "build_config.h"
 
 // Configuration constants (sourced from Kconfig via build_config.h)
 #define PCM_VIZ_CHUNK_SIZE      CONFIG_VIZ_CHUNK_SIZE

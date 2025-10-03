@@ -4,8 +4,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include "config/config_manager.h"  // For device_mode_t
-#include "bq25895/bq25895.h"
-#include "bq25895/bq25895_integration.h"
+#include "bq25895.h"
+#include "bq25895_integration.h"
 
 /**
  * @brief Events that can be sent to the lifecycle manager

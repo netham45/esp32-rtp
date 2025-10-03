@@ -8,7 +8,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lifecycle_manager.h"
-#include "bq25895/bq25895_integration.h"
+#include "bq25895_integration.h"
 
 static const char *TAG = "mdns_service";
 

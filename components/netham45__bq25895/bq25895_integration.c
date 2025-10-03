@@ -4,7 +4,7 @@
  */
 
 #include "bq25895_integration.h"
-#include "bq25895/bq25895.h"
+#include "bq25895.h"
 #include "esp_log.h"
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"

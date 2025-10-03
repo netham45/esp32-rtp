@@ -1,0 +1,17 @@
+dependencies:
+  idf:
+    version: '>=5.4'
+  espressif/led_strip: ^3.0.1~1
+  espressif/esp-dsp: '1.3.0'
+description: rmt led visualizer for esp-rtp
+repository: git://github.com/netham45/esp32-visualizer
+repository_info:
+  commit_sha: 000000000000000000000000000000000000000e
+  path: visualizer/
+targets:
+- esp32s2
+- esp32s3
+- esp32p4
+- esp32
+url: https://github.com/netham45/esp32-visualizer
+version: 1.0.0

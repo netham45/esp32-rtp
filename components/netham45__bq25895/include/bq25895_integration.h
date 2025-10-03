@@ -7,7 +7,7 @@
 #define BQ25895_INTEGRATION_H
 
 #include "esp_err.h"
-#include "bq25895/bq25895.h" // Include the main driver header for status/params structs
+#include "bq25895.h" // Include the main driver header for status/params structs
 
 /**
  * @brief Initialize the BQ25895 battery charger and its web interface.

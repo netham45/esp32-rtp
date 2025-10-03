@@ -5,7 +5,7 @@
 #include "cJSON.h"
 #include "config.h"
 #include "esp_log.h"
-#include "visualizer/visualizer_task.h"
+#include "visualizer_task.h"
 #include <string.h>
 
 #define TAG "settings_routes"

@@ -1,10 +1,9 @@
 dependencies:
-  cherry-embedded/cherryusb: '*'
   espressif/mdns: '*'
   idf: '>=5.0'
-  espressif/led_strip: ^3.0.1~1
-  espressif/esp-dsp: '1.3.0'
   netham45/spdif_in: '*'
   netham45/spdif_out: '*'
   netham45/usb_in: '*'
   netham45/usb_out: '*'
+  netham45/bq25895: '*'
+  netham45/visualizer: '*'

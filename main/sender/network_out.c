@@ -23,7 +23,7 @@
 #include "spdif_in.h"
 #include "usb_in.h"
 #include "config/config_manager.h"  // For device_mode_t enum
-#include "visualizer/pcm_visualizer.h"  // For pcm_viz_write
+#include "pcm_visualizer.h"  // For pcm_viz_write
 
 // RTP header structure (12 bytes)
 typedef struct __attribute__((packed)) {

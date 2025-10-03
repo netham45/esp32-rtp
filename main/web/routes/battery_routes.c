@@ -3,7 +3,7 @@
 #include "esp_http_server.h"
 #include "cJSON.h"
 #include "lifecycle_manager.h"
-#include "bq25895/bq25895_json.h"
+#include "bq25895_json.h"
 #include <stdlib.h>
 #include <string.h>
 

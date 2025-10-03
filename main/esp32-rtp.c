@@ -18,7 +18,7 @@
 #include "wifi/wifi_manager.h"
 #include "lifecycle_manager.h"
 #include "logging/log_buffer.h"
-#include "bq25895/bq25895_integration.h"
+#include "bq25895_integration.h"
 #include "TS3USB30ERSWR/usb_switch.h"
 
 

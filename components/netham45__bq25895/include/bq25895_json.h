@@ -1,6 +1,6 @@
 #pragma once
 #include "esp_err.h"
-#include "bq25895/bq25895.h"
+#include "bq25895.h"
 #include "cJSON.h"
 
 #ifdef __cplusplus

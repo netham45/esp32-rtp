@@ -1,18 +1,4 @@
 dependencies:
-  cherry-embedded/cherryusb:
-    component_hash: ec3fda70779076a4a996abc52684fcafe4c61b269b722b775562f96c042c08f6
-    dependencies:
-    - name: idf
-      require: private
-      version: '>=4.4.1'
-    source:
-      registry_url: https://components.espressif.com/
-      type: service
-    targets:
-    - esp32s2
-    - esp32s3
-    - esp32p4
-    version: 1.5.2~2
   espressif/cmake_utilities:
     component_hash: 05165f30922b422b4b90c08845e6d449329b97370fbd06309803d8cb539d79e3
     dependencies:
@@ -76,18 +62,10 @@ dependencies:
     - esp32p4
     version: 0.2.0
   espressif/usb_host_uac:
-    component_hash: 6bcac5e817b87e6d089574f2280d35eef2e761e387b667909c158238358d2a14
-    dependencies:
-    - name: idf
-      require: private
-      version: '>=4.4'
+    dependencies: []
     source:
-      registry_url: https://components.espressif.com/
-      type: service
-    targets:
-    - esp32s2
-    - esp32s3
-    - esp32p4
+      path: C:\Users\Nathan\Documents\GitHub\esp32-rtp\components\espressif__usb_host_uac
+      type: local
     version: 1.0.0
   idf:
     source:
@@ -107,6 +85,12 @@ dependencies:
     - esp32s3
     - esp32p4
     version: 0.16.0~6
+  netham45/bq25895:
+    dependencies: []
+    source:
+      path: C:\Users\Nathan\Documents\GitHub\esp32-rtp\components\netham45__bq25895
+      type: local
+    version: 1.0.0
   netham45/spdif_in:
     dependencies: []
     source:
@@ -131,18 +115,25 @@ dependencies:
       path: C:\Users\Nathan\Documents\GitHub\esp32-rtp\components\netham45__usb_out
       type: local
     version: 1.0.0
+  netham45/visualizer:
+    dependencies: []
+    source:
+      path: C:\Users\Nathan\Documents\GitHub\esp32-rtp\components\netham45__visualizer
+      type: local
+    version: 1.0.0
 direct_dependencies:
-- cherry-embedded/cherryusb
 - espressif/esp-dsp
 - espressif/led_strip
 - espressif/mdns
 - espressif/usb_device_uac
 - espressif/usb_host_uac
 - idf
+- netham45/bq25895
 - netham45/spdif_in
 - netham45/spdif_out
 - netham45/usb_in
 - netham45/usb_out
-manifest_hash: 19cf05f8d184b2bd84da6c4a26d2215d6f12b3851ba5dc2a412ebd8d0af53ef5
+- netham45/visualizer
+manifest_hash: 3ba36d8f4b2ff5742daf41215454ba0288e03036c69de7dc9d28955152d3125d
 target: esp32s3
 version: 2.0.0
