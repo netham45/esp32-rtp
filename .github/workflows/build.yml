@@ -20,10 +20,7 @@ jobs:
         
       - name: Initialize USB UAC Host Submodule
         run: |
-          git submodule init components/espressif__usb_host_uac
-          git submodule update --init components/espressif__usb_host_uac
-          git submodule init components/netham45__spdif_in
-          git submodule update --init components/netham45__spdif_in
+          git submodule update --init --recursive .
      
       - name: Setup Python
         uses: actions/setup-python@v4
