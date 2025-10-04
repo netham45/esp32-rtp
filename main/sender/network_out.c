@@ -598,6 +598,8 @@ static void rtp_sender_task(void *arg)
             pcm_out_buffer = usb_in_get_ringbuf();
         }
     }
+
+    ESP_LOGI(TAG, "Got ringbuf, mode: %d", current_mode);
     
     while (s_is_sender_running) {
         if (s_is_muted) {
