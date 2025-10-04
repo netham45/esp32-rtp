@@ -182,14 +182,24 @@ Firmware updates can be performed through the web interface:
 - **Sample Rates**: 48kHz
 - **Channels**: Stereo
 
-## 🔧 Building from Source
+## Installation
 
-### Prerequisites
+### Easy Flash Option (Chrome Browser)
+
+For a quick and easy way to flash pre-built firmware, you can use the web flash tool:
+
+1. Open Chrome browser and navigate to https://screamrouter.net/esp32-flasher
+2. Connect your ESP32 device via USB
+3. Follow the on-screen instructions to flash the firmware
+
+### Build from Source
+
+#### Prerequisites
 
 - ESP-IDF v5.0 or later
 - Python 3.7+
 
-### Build Steps
+#### Build Steps
 
 ```bash
 # Clone the repository
