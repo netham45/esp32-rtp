@@ -71,6 +71,11 @@ static void handle_state_entry(lifecycle_state_t state) {
             lifecycle_services_init_spdif_receiver();  // Only initializes in SPDIF sender mode
             ESP_ERROR_CHECK(lifecycle_services_init_web_server());
             
+            // Initialize mDNS immediately after WiFi, regardless of connection state
+            // This allows mDNS to work in AP mode as well
+            ESP_LOGI(TAG, "Initializing mDNS services (works in both AP and STA modes)");
+            lifecycle_services_init_mdns();
+            
             set_state(LIFECYCLE_STATE_AWAITING_MODE_CONFIG);
             break;
         }
@@ -220,8 +225,9 @@ static void handle_state_awaiting_mode_config(lifecycle_event_t event) {
     ESP_LOGI(TAG, "LIFECYCLE: Handling state: AWAITING_MODE_CONFIG");
     switch (event) {
         case LIFECYCLE_EVENT_WIFI_CONNECTED:
-            ESP_LOGI(TAG, "WiFi connected, starting services.");
-            lifecycle_services_init_mdns();
+            ESP_LOGI(TAG, "WiFi connected in STA mode.");
+            // mDNS is already initialized during STARTING_SERVICES state
+            // Just re-evaluate for mode transition
             evaluate_and_transition();
             break;
         case LIFECYCLE_EVENT_WIFI_DISCONNECTED:
@@ -275,6 +281,9 @@ static void handle_state_mode_sender_usb(lifecycle_event_t event) {
         }
     } else if (event == LIFECYCLE_EVENT_START_PAIRING) {
         set_state(LIFECYCLE_STATE_PAIRING);
+    } else if (event == LIFECYCLE_EVENT_WIFI_CONNECTED) {
+        ESP_LOGI(TAG, "WiFi connected in sender mode - mDNS already running");
+        // mDNS is already initialized, no action needed
     }
 }
 
@@ -293,6 +302,9 @@ static void handle_state_mode_sender_spdif(lifecycle_event_t event) {
         }
     } else if (event == LIFECYCLE_EVENT_START_PAIRING) {
         set_state(LIFECYCLE_STATE_PAIRING);
+    } else if (event == LIFECYCLE_EVENT_WIFI_CONNECTED) {
+        ESP_LOGI(TAG, "WiFi connected in sender mode - mDNS already running");
+        // mDNS is already initialized, no action needed
     }
 }
 
