@@ -114,7 +114,7 @@ esp_err_t usb_in_init(void (*init_done_cb)(void))
         return ESP_OK;
     }
 
-    usb_in_pcm_buffer = xRingbufferCreate(PCM_BUFFER_SIZE, RINGBUF_TYPE_BYTEBUF);
+    usb_in_pcm_buffer = xRingbufferCreate(USB_PCM_BUFFER_SIZE, RINGBUF_TYPE_BYTEBUF);
     if (!usb_in_pcm_buffer)
     {
         return ESP_FAIL;

@@ -25,7 +25,9 @@
         "services.h": "c",
         "spdif_in.h": "c",
         "spdif_out.h": "c",
-        "string.h": "c"
+        "string.h": "c",
+        "esp_log.h": "c",
+        "ts3usb30erswr.h": "c"
     },
     "chat.agent.enabled": false,
     "chat.commandCenter.enabled": false,

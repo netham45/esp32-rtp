@@ -1,7 +1,7 @@
 #include "settings_routes.h"
 #include "lifecycle_manager.h"
 #include "lifecycle/config.h"
-#include "wifi/wifi_manager.h"
+#include "wifi_manager.h"
 #include "cJSON.h"
 #include "config.h"
 #include "esp_log.h"

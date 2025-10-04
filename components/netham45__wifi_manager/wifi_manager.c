@@ -9,7 +9,6 @@
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
 #include "freertos/timers.h"
-#include "lifecycle_manager.h"
 #include <string.h>
 #include <inttypes.h>
 
@@ -65,10 +64,68 @@ static int s_retry_num = 0;
 // Timer callback forward declaration
 static void wifi_reconnect_timer_cb(TimerHandle_t xTimer);
 
+// Callback for event notifications
+static wifi_manager_event_cb_t s_event_callback = NULL;
+static void* s_event_callback_user_data = NULL;
+
+// AP configuration storage
+static wifi_manager_ap_config_t s_ap_config = {
+    .ssid = "ESP32-AP",
+    .password = "",
+    .hide_when_sta_connected = false,
+    .channel = WIFI_AP_CHANNEL,
+    .max_connections = WIFI_AP_MAX_CONNECTIONS
+};
+
 // Forward declarations for internal functions
 static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                               int32_t event_id, void *event_data);
 static esp_err_t start_ap_mode(void);
+
+/**
+ * Notify registered callback of WiFi events
+ */
+static void wifi_manager_notify_event(wifi_manager_event_type_t type, void* event_data) {
+    if (s_event_callback) {
+        wifi_manager_event_t event = {
+            .type = type
+        };
+        
+        // Copy event-specific data
+        switch(type) {
+            case WIFI_MANAGER_EVENT_STA_GOT_IP:
+                if (event_data) {
+                    ip_event_got_ip_t* got_ip = (ip_event_got_ip_t*)event_data;
+                    event.data.got_ip.ip = got_ip->ip_info.ip.addr;
+                    event.data.got_ip.netmask = got_ip->ip_info.netmask.addr;
+                    event.data.got_ip.gateway = got_ip->ip_info.gw.addr;
+                }
+                break;
+            case WIFI_MANAGER_EVENT_STA_DISCONNECTED:
+                if (event_data) {
+                    wifi_event_sta_disconnected_t* disconn = (wifi_event_sta_disconnected_t*)event_data;
+                    event.data.sta_disconnected.reason = disconn->reason;
+                }
+                break;
+            case WIFI_MANAGER_EVENT_AP_STA_CONNECTED:
+                if (event_data) {
+                    wifi_event_ap_staconnected_t* conn = (wifi_event_ap_staconnected_t*)event_data;
+                    memcpy(event.data.ap_sta_connected.mac, conn->mac, 6);
+                }
+                break;
+            case WIFI_MANAGER_EVENT_AP_STA_DISCONNECTED:
+                if (event_data) {
+                    wifi_event_ap_stadisconnected_t* disconn = (wifi_event_ap_stadisconnected_t*)event_data;
+                    memcpy(event.data.ap_sta_disconnected.mac, disconn->mac, 6);
+                }
+                break;
+            default:
+                break;
+        }
+        
+        s_event_callback(&event, s_event_callback_user_data);
+    }
+}
 
 /**
  * Initialize the WiFi manager
@@ -172,10 +229,10 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
             }
         } else if (event_id == WIFI_EVENT_STA_DISCONNECTED) {
             wifi_event_sta_disconnected_t *disconn = event_data;
-            lifecycle_manager_post_event(LIFECYCLE_EVENT_WIFI_DISCONNECTED);
+            wifi_manager_notify_event(WIFI_MANAGER_EVENT_STA_DISCONNECTED, disconn);
             
             // Re-enable AP mode if it was hidden while connected
-            if (lifecycle_get_hide_ap_when_connected()) {
+            if (s_ap_config.hide_when_sta_connected) {
                 ESP_LOGI(TAG, "Re-enabling AP interface after disconnection");
                 esp_wifi_set_mode(WIFI_MODE_APSTA);
             }
@@ -208,11 +265,13 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
             ESP_LOGI(TAG, "Station connected to AP, MAC: %02x:%02x:%02x:%02x:%02x:%02x",
                    event->mac[0], event->mac[1], event->mac[2],
                    event->mac[3], event->mac[4], event->mac[5]);
+            wifi_manager_notify_event(WIFI_MANAGER_EVENT_AP_STA_CONNECTED, event);
         } else if (event_id == WIFI_EVENT_AP_STADISCONNECTED) {
             wifi_event_ap_stadisconnected_t *event = (wifi_event_ap_stadisconnected_t*) event_data;
             ESP_LOGI(TAG, "Station disconnected from AP, MAC: %02x:%02x:%02x:%02x:%02x:%02x",
                    event->mac[0], event->mac[1], event->mac[2],
                    event->mac[3], event->mac[4], event->mac[5]);
+            wifi_manager_notify_event(WIFI_MANAGER_EVENT_AP_STA_DISCONNECTED, event);
         }
     } else if (event_base == IP_EVENT) {
         if (event_id == IP_EVENT_STA_GOT_IP) {
@@ -222,12 +281,12 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
             s_retry_num = 0;
             xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
             s_wifi_manager_state = WIFI_MANAGER_STATE_CONNECTED;
-            lifecycle_manager_post_event(LIFECYCLE_EVENT_WIFI_CONNECTED);
+            wifi_manager_notify_event(WIFI_MANAGER_EVENT_STA_GOT_IP, event);
 
             // mDNS restart is handled by lifecycle_manager when network changes
 
             // If configured to hide AP when connected, disable AP interface
-            if (lifecycle_get_hide_ap_when_connected()) {
+            if (s_ap_config.hide_when_sta_connected) {
                 ESP_LOGI(TAG, "Disabling AP interface when connected (as configured)");
                 esp_wifi_set_mode(WIFI_MODE_STA);
             }
@@ -262,9 +321,9 @@ esp_err_t wifi_manager_start(void) {
         ESP_ERROR_CHECK(wifi_manager_init());
     }
     
-    // Get AP configuration from lifecycle manager
-    const char* ap_ssid = lifecycle_get_ap_ssid();
-    const char* ap_password = lifecycle_get_ap_password();
+    // Get AP configuration from stored config
+    const char* ap_ssid = s_ap_config.ssid;
+    const char* ap_password = s_ap_config.password;
     
     // Configure AP mode
     wifi_config_t wifi_ap_config = {
@@ -375,9 +434,9 @@ static esp_err_t start_ap_mode(void) {
     
     // mDNS is started by lifecycle services; nothing to do here
      
-    // Get AP configuration from lifecycle manager
-    const char* ap_ssid = lifecycle_get_ap_ssid();
-    const char* ap_password = lifecycle_get_ap_password();
+    // Get AP configuration from stored config
+    const char* ap_ssid = s_ap_config.ssid;
+    const char* ap_password = s_ap_config.password;
     
     // Configure AP
     wifi_config_t wifi_ap_config = {
@@ -651,9 +710,9 @@ esp_err_t wifi_manager_connect(const char *ssid, const char *password) {
         strncpy((char*)wifi_sta_config.sta.password, password, sizeof(wifi_sta_config.sta.password));
     }
     
-    // Get AP configuration from lifecycle manager
-    const char* ap_ssid = lifecycle_get_ap_ssid();
-    const char* ap_password = lifecycle_get_ap_password();
+    // Get AP configuration from stored config
+    const char* ap_ssid = s_ap_config.ssid;
+    const char* ap_password = s_ap_config.password;
     
     // Configure AP mode
     wifi_config_t wifi_ap_config = {
@@ -1133,5 +1192,68 @@ esp_err_t wifi_manager_connect_to_strongest(void) {
         start_ap_mode();
         return ESP_ERR_TIMEOUT;
     }
+}
+/**
+ * Initialize WiFi manager with custom AP configuration
+ */
+esp_err_t wifi_manager_init_with_config(const wifi_manager_ap_config_t* ap_config) {
+    if (ap_config) {
+        memcpy(&s_ap_config, ap_config, sizeof(wifi_manager_ap_config_t));
+    }
+    return wifi_manager_init();
+}
+
+/**
+ * Register a callback for WiFi events
+ */
+esp_err_t wifi_manager_register_event_callback(wifi_manager_event_cb_t cb, void* user_data) {
+    s_event_callback = cb;
+    s_event_callback_user_data = user_data;
+    return ESP_OK;
+}
+
+/**
+ * Unregister the WiFi event callback
+ */
+esp_err_t wifi_manager_unregister_event_callback(void) {
+    s_event_callback = NULL;
+    s_event_callback_user_data = NULL;
+    return ESP_OK;
+}
+
+/**
+ * Update AP configuration
+ */
+esp_err_t wifi_manager_set_ap_config(const wifi_manager_ap_config_t* ap_config) {
+    if (!ap_config) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    memcpy(&s_ap_config, ap_config, sizeof(wifi_manager_ap_config_t));
+    
+    // If WiFi is running and in AP mode, apply the new configuration
+    wifi_mode_t mode;
+    if (esp_wifi_get_mode(&mode) == ESP_OK) {
+        if (mode == WIFI_MODE_AP || mode == WIFI_MODE_APSTA) {
+            // Reconfigure AP
+            wifi_config_t wifi_ap_config = {
+                .ap = {
+                    .ssid_len = strlen(s_ap_config.ssid),
+                    .channel = s_ap_config.channel,
+                    .max_connection = s_ap_config.max_connections,
+                    .authmode = strlen(s_ap_config.password) > 0 ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN
+                },
+            };
+            
+            strncpy((char*)wifi_ap_config.ap.ssid, s_ap_config.ssid, sizeof(wifi_ap_config.ap.ssid));
+            if (strlen(s_ap_config.password) > 0) {
+                strncpy((char*)wifi_ap_config.ap.password, s_ap_config.password, sizeof(wifi_ap_config.ap.password));
+            }
+            
+            return esp_wifi_set_config(WIFI_IF_AP, &wifi_ap_config);
+        }
+    }
+    
+    return ESP_OK;
 }
 

@@ -3,7 +3,8 @@
 #include "../lifecycle_manager.h"
 #include "../global.h"
 #include "../config/config_manager.h"
-#include "../wifi/wifi_manager.h"
+#include "wifi_manager.h"
+#include "lifecycle_wifi_adapter.h"
 #include "../mdns/mdns_service.h"
 #include "../mdns/mdns_discovery.h"
 #include "../sender/network_out.h"
@@ -299,6 +300,8 @@ esp_err_t lifecycle_set_ap_ssid(const char* ssid) {
         config->ap_ssid[WIFI_SSID_MAX_LENGTH] = '\0';
         esp_err_t ret = config_manager_save_setting("ap_ssid", config->ap_ssid, sizeof(config->ap_ssid));
         if (ret == ESP_OK) {
+            // Update WiFi adapter configuration with new AP settings
+            lifecycle_wifi_adapter_update_config();
             lifecycle_manager_post_event(LIFECYCLE_EVENT_CONFIGURATION_CHANGED);
         }
         return ret;
@@ -318,6 +321,8 @@ esp_err_t lifecycle_set_ap_password(const char* password) {
         config->ap_password[WIFI_PASSWORD_MAX_LENGTH] = '\0';
         esp_err_t ret = config_manager_save_setting("ap_password", config->ap_password, sizeof(config->ap_password));
         if (ret == ESP_OK) {
+            // Update WiFi adapter configuration with new AP settings
+            lifecycle_wifi_adapter_update_config();
             lifecycle_manager_post_event(LIFECYCLE_EVENT_CONFIGURATION_CHANGED);
         }
         return ret;
@@ -332,6 +337,9 @@ esp_err_t lifecycle_set_hide_ap_when_connected(bool hide) {
         config->hide_ap_when_connected = hide;
         esp_err_t ret = config_manager_save_setting("hide_ap_when_connected", &hide, sizeof(hide));
         if (ret == ESP_OK) {
+            // Update WiFi adapter configuration with new AP settings
+            lifecycle_wifi_adapter_update_config();
+            
             // Apply AP visibility change immediately if connected
             wifi_manager_state_t wifi_state = wifi_manager_get_state();
             if (wifi_state == WIFI_MANAGER_STATE_CONNECTED) {

@@ -22,7 +22,7 @@ extern "C" {
 #define USB_BUFFER_SIZE         CONFIG_USB_IN_BUFFER_SIZE
 #define USB_TASK_STACK_SIZE     CONFIG_USB_IN_TASK_STACK_SIZE
 #define USB_TASK_PRIORITY       CONFIG_USB_IN_TASK_PRIORITY
-#define PCM_BUFFER_SIZE         CONFIG_USB_IN_PCM_BUFFER_SIZE
+#define USB_PCM_BUFFER_SIZE         CONFIG_USB_IN_PCM_BUFFER_SIZE
 
 // External PCM buffer shared with network_out
 extern RingbufHandle_t usb_in_pcm_buffer;

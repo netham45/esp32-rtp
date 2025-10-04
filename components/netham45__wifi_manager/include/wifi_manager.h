@@ -16,6 +16,52 @@
 // Timeout for connection attempts (in milliseconds)
 #define WIFI_CONNECTION_TIMEOUT_MS 10000
 
+// ========== NEW GENERIC INTERFACES FOR PORTABILITY ==========
+
+// Configuration structure for AP mode
+typedef struct {
+    char ssid[WIFI_SSID_MAX_LENGTH + 1];
+    char password[WIFI_PASSWORD_MAX_LENGTH + 1];
+    bool hide_when_sta_connected;
+    uint8_t channel;
+    uint8_t max_connections;
+} wifi_manager_ap_config_t;
+
+// Event types for callbacks
+typedef enum {
+    WIFI_MANAGER_EVENT_STA_CONNECTED,
+    WIFI_MANAGER_EVENT_STA_DISCONNECTED,
+    WIFI_MANAGER_EVENT_STA_GOT_IP,
+    WIFI_MANAGER_EVENT_AP_STA_CONNECTED,
+    WIFI_MANAGER_EVENT_AP_STA_DISCONNECTED,
+} wifi_manager_event_type_t;
+
+// Event data structure
+typedef struct {
+    wifi_manager_event_type_t type;
+    union {
+        struct {
+            uint32_t ip;
+            uint32_t netmask;
+            uint32_t gateway;
+        } got_ip;
+        struct {
+            uint8_t mac[6];
+        } ap_sta_connected;
+        struct {
+            uint8_t mac[6];
+        } ap_sta_disconnected;
+        struct {
+            uint16_t reason;
+        } sta_disconnected;
+    } data;
+} wifi_manager_event_t;
+
+// Callback function typedef
+typedef void (*wifi_manager_event_cb_t)(wifi_manager_event_t* event, void* user_data);
+
+// ========== EXISTING TYPEDEFS ==========
+
 // WiFi manager states
 typedef enum {
     WIFI_MANAGER_STATE_NOT_INITIALIZED,
@@ -44,6 +90,38 @@ typedef struct {
  * @return esp_err_t ESP_OK on success
  */
 esp_err_t wifi_manager_init(void);
+
+/**
+ * @brief Initialize the WiFi manager with custom AP configuration
+ *
+ * @param ap_config AP configuration to use (can be NULL for defaults)
+ * @return esp_err_t ESP_OK on success
+ */
+esp_err_t wifi_manager_init_with_config(const wifi_manager_ap_config_t* ap_config);
+
+/**
+ * @brief Register a callback function for WiFi events
+ *
+ * @param cb Callback function to register
+ * @param user_data User data to pass to callback
+ * @return esp_err_t ESP_OK on success
+ */
+esp_err_t wifi_manager_register_event_callback(wifi_manager_event_cb_t cb, void* user_data);
+
+/**
+ * @brief Unregister the WiFi event callback
+ *
+ * @return esp_err_t ESP_OK on success
+ */
+esp_err_t wifi_manager_unregister_event_callback(void);
+
+/**
+ * @brief Update the AP configuration
+ *
+ * @param ap_config New AP configuration to apply
+ * @return esp_err_t ESP_OK on success
+ */
+esp_err_t wifi_manager_set_ap_config(const wifi_manager_ap_config_t* ap_config);
 
 /**
  * @brief Start the WiFi manager. Will attempt to connect using stored credentials or start AP mode

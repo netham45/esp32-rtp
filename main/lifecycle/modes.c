@@ -16,6 +16,8 @@
 #include "spdif_in.h"
 #include "spdif_out.h"
 
+#include "TS3USB30ERSWR.h"  // USB switch control
+
 #undef TAG
 #define TAG "lifecycle_modes"
 
@@ -71,9 +73,20 @@ esp_err_t lifecycle_mode_stop(lifecycle_state_t mode) {
 
 static esp_err_t start_mode_sender_usb(void) {
     ESP_LOGI(TAG, "Starting USB sender mode...");
+    
+    // Switch USB to Port 2 for USB sender mode
+    ESP_LOGI(TAG, "Setting USB switch to Port 2 for USB sender mode");
+    esp_err_t ret = usb_switch_set_port(USB_SWITCH_PORT_2);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to set USB switch to Port 2: %s", esp_err_to_name(ret));
+        // Non-critical, continue
+    } else {
+        ESP_LOGI(TAG, "USB switch set to Port 2 successfully");
+    }
+    
     // Initialize network sender first (reads from pcm_buffer)
     heap_caps_print_heap_info(MALLOC_CAP_INTERNAL);
-    esp_err_t ret = rtp_sender_init();
+    ret = rtp_sender_init();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize RTP sender: %s", esp_err_to_name(ret));
         return ret;
@@ -143,6 +156,16 @@ static esp_err_t stop_mode_sender_usb(void) {
     // Deinitialize USB input
     usb_in_deinit();
     
+    // Switch USB back to Port 1 (default)
+    ESP_LOGI(TAG, "Setting USB switch back to Port 1 (default)");
+    ret = usb_switch_set_port(USB_SWITCH_PORT_1);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to set USB switch to Port 1: %s", esp_err_to_name(ret));
+        // Non-critical, continue
+    } else {
+        ESP_LOGI(TAG, "USB switch set to Port 1 successfully");
+    }
+    
     ESP_LOGI(TAG, "USB sender mode stopped");
     return ESP_OK;
 }
@@ -151,9 +174,18 @@ static esp_err_t stop_mode_sender_usb(void) {
 
 static esp_err_t start_mode_sender_spdif(void) {
     ESP_LOGI(TAG, "Starting S/PDIF sender mode...");
+    
+    // Ensure USB switch is in default state (Port 1)
+    ESP_LOGI(TAG, "Ensuring USB switch is set to Port 1 (default)");
+    esp_err_t ret = usb_switch_set_port(USB_SWITCH_PORT_1);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to set USB switch to Port 1: %s", esp_err_to_name(ret));
+        // Non-critical, continue
+    }
+    
     ESP_LOGI(TAG, "Initializing Scream sender");
     heap_caps_print_heap_info(MALLOC_CAP_INTERNAL);
-    esp_err_t ret = rtp_sender_init();
+    ret = rtp_sender_init();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize Scream sender: %s", esp_err_to_name(ret));
         return ret;
@@ -205,6 +237,15 @@ static esp_err_t stop_mode_sender_spdif(void) {
 
 static esp_err_t start_mode_receiver_usb(void) {
     ESP_LOGI(TAG, "Starting USB receiver mode...");
+    
+    // Ensure USB switch is in default state (Port 1)
+    ESP_LOGI(TAG, "Ensuring USB switch is set to Port 1 (default)");
+    esp_err_t ret = usb_switch_set_port(USB_SWITCH_PORT_1);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to set USB switch to Port 1: %s", esp_err_to_name(ret));
+        // Non-critical, continue
+    }
+    
     // Setup audio output first
     setup_audio();
 
@@ -217,7 +258,7 @@ static esp_err_t start_mode_receiver_usb(void) {
 
     // Initialize and start SAP listener
     heap_caps_print_heap_info(MALLOC_CAP_INTERNAL);
-    esp_err_t ret = sap_listener_init();
+    ret = sap_listener_init();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize SAP listener: %s", esp_err_to_name(ret));
     } else {
@@ -302,6 +343,15 @@ static esp_err_t stop_mode_receiver_usb(void) {
 
 static esp_err_t start_mode_receiver_spdif(void) {
     ESP_LOGI(TAG, "Starting S/PDIF receiver mode...");
+    
+    // Ensure USB switch is in default state (Port 1)
+    ESP_LOGI(TAG, "Ensuring USB switch is set to Port 1 (default)");
+    esp_err_t ret = usb_switch_set_port(USB_SWITCH_PORT_1);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to set USB switch to Port 1: %s", esp_err_to_name(ret));
+        // Non-critical, continue
+    }
+    
     uint32_t sample_rate = lifecycle_get_sample_rate();
     uint8_t spdif_data_pin = lifecycle_get_spdif_data_pin();
 
@@ -341,7 +391,7 @@ static esp_err_t start_mode_receiver_spdif(void) {
     
     // Initialize and start SAP listener
     heap_caps_print_heap_info(MALLOC_CAP_INTERNAL);
-    esp_err_t ret = sap_listener_init();
+    ret = sap_listener_init();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize SAP listener: %s", esp_err_to_name(ret));
     } else {

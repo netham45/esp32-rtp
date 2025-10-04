@@ -6,7 +6,7 @@
 #include "route_helpers.h"
 #include "esp_log.h"
 #include "esp_netif.h"
-#include "wifi/wifi_manager.h"
+#include "wifi_manager.h"
 #include <string.h>
 #include <stdlib.h>
 #include "visualizer_task.h"

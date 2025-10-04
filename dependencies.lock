@@ -85,6 +85,12 @@ dependencies:
     - esp32s3
     - esp32p4
     version: 0.16.0~6
+  netham45/TS3USB30ERSWR:
+    dependencies: []
+    source:
+      path: C:\Users\Nathan\Documents\GitHub\esp32-rtp\components\netham45__TS3USB30ERSWR
+      type: local
+    version: 1.0.0
   netham45/bq25895:
     dependencies: []
     source:
@@ -109,22 +115,28 @@ dependencies:
       path: C:\Users\Nathan\Documents\GitHub\esp32-rtp\components\netham45__spdif_out
       type: local
     version: 1.0.0
-  netham45/usb_in:
+  netham45/usb_uac_device_in:
     dependencies: []
     source:
-      path: C:\Users\Nathan\Documents\GitHub\esp32-rtp\components\netham45__usb_in
+      path: C:\Users\Nathan\Documents\GitHub\esp32-rtp\components\netham45__usb_uac_device_in
       type: local
     version: 1.0.0
-  netham45/usb_out:
+  netham45/usb_uac_host_out:
     dependencies: []
     source:
-      path: C:\Users\Nathan\Documents\GitHub\esp32-rtp\components\netham45__usb_out
+      path: C:\Users\Nathan\Documents\GitHub\esp32-rtp\components\netham45__usb_uac_host_out
       type: local
     version: 1.0.0
   netham45/visualizer:
     dependencies: []
     source:
       path: C:\Users\Nathan\Documents\GitHub\esp32-rtp\components\netham45__visualizer
+      type: local
+    version: 1.0.0
+  netham45/wifi_manager:
+    dependencies: []
+    source:
+      path: C:\Users\Nathan\Documents\GitHub\esp32-rtp\components\netham45__wifi_manager
       type: local
     version: 1.0.0
 direct_dependencies:
@@ -134,13 +146,15 @@ direct_dependencies:
 - espressif/usb_device_uac
 - espressif/usb_host_uac
 - idf
+- netham45/TS3USB30ERSWR
 - netham45/bq25895
 - netham45/ntp
 - netham45/spdif_in
 - netham45/spdif_out
-- netham45/usb_in
-- netham45/usb_out
+- netham45/usb_uac_device_in
+- netham45/usb_uac_host_out
 - netham45/visualizer
-manifest_hash: 0abdce025a2a12e69167bd7595d1c85007fa14ee7a33088ef5787a9d2645a50c
+- netham45/wifi_manager
+manifest_hash: 2655ec9adccee45508faec2b66b28090f2a691e59734645b0e9a7eaaa03c82d1
 target: esp32s3
 version: 2.0.0

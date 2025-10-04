@@ -1,0 +1,15 @@
+dependencies:
+  idf:
+    version: '>=5.4'
+description: USB Switch Controller
+kconfig_file: "Kconfig"
+repository: git://github.com/netham45/esp32-TS3USB30ERSWR
+repository_info:
+  commit_sha: 000000000000000000000000000000000000000e
+  path: TS3USB30ERSWR/
+targets:
+- esp32s2
+- esp32s3
+- esp32p4
+url: https://github.com/netham45/esp32-TS3USB30ERSWR
+version: 1.0.0

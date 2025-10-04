@@ -1,6 +1,6 @@
 #include "wifi_routes.h"
 #include "route_helpers.h"
-#include "wifi/wifi_manager.h"
+#include "wifi_manager.h"
 #include "lifecycle_manager.h"
 #include "esp_log.h"
 #include "esp_http_server.h"

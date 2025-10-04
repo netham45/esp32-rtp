@@ -3,7 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include "esp_err.h"
-#include "wifi/wifi_manager.h" // For WIFI_PASSWORD_MAX_LENGTH
+#include "wifi_manager.h" // For WIFI_PASSWORD_MAX_LENGTH
 
 // NVS namespace for storing configuration
 #define CONFIG_NVS_NAMESPACE "app_config"

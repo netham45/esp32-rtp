@@ -32,16 +32,6 @@ set(WEB_ROUTES_SRCS
     "web/routes/routes.c"
 )
 
-# OTA manager files
-set(OTA_SRCS
-    "ota/ota_manager.c"
-)
-
-# Logging module files
-set(LOGGING_SRCS
-    "logging/log_buffer.c"
-)
-
 # Lifecycle manager module files
 set(LIFECYCLE_SRCS
     "lifecycle/hw_init.c"
@@ -52,6 +42,7 @@ set(LIFECYCLE_SRCS
     "lifecycle/reconfig.c"
     "lifecycle/modes.c"
     "lifecycle/state_machine.c"
+    "lifecycle/lifecycle_wifi_adapter.c"
 )
 
 set (RECEIVER_SRCS
@@ -66,14 +57,11 @@ idf_component_register(SRCS "esp32-rtp.c"
                            "config/config_manager.c"
                            "mdns/mdns_service.c"
                            "mdns/mdns_discovery.c"
-                           "pairing/pairing_manager.c"
                            "sender/network_out.c"
                            "web/web_server.c"
-                           "wifi/wifi_manager.c"
-                           "TS3USB30ERSWR/usb_switch.c"
                            ${WEB_ROUTES_SRCS}
-                           ${OTA_SRCS}
-                           ${LOGGING_SRCS}
+                           "logging/log_buffer.c"
+                           "ota/ota_manager.c"
                            ${LIFECYCLE_SRCS}
                            ${RECEIVER_SRCS}
                       INCLUDE_DIRS "."

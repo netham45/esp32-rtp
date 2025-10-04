@@ -2,7 +2,8 @@
 #include "lifecycle_internal.h"
 #include "../global.h"
 #include "../config/config_manager.h"
-#include "../wifi/wifi_manager.h"
+#include "lifecycle_wifi_adapter.h"
+#include "wifi_manager.h"
 #include "../web/web_server.h"
 #include "../mdns/mdns_discovery.h"
 #include "../mdns/mdns_service.h"
@@ -14,7 +15,7 @@ esp_err_t lifecycle_services_init_wifi(void) {
     // Initialize WiFi FIRST to allocate GDMA channels for crypto before RMT claims them
     ESP_LOGI(TAG, "Initializing WiFi manager...");
     heap_caps_print_heap_info(MALLOC_CAP_INTERNAL);
-    esp_err_t ret = wifi_manager_init();
+    esp_err_t ret = lifecycle_wifi_adapter_init();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize WiFi manager: %s", esp_err_to_name(ret));
         return ret;

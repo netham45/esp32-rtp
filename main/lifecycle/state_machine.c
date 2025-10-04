@@ -7,8 +7,7 @@
 #include "config.h"
 #include "../global.h"
 #include "../config/config_manager.h"
-#include "../wifi/wifi_manager.h"
-#include "../pairing/pairing_manager.h"
+#include "wifi_manager.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
@@ -95,13 +94,7 @@ static void handle_state_entry(lifecycle_state_t state) {
             lifecycle_sleep_enter_silence_mode();
             break;
         case LIFECYCLE_STATE_PAIRING: {
-            ESP_LOGI(TAG, "Starting pairing mode");
-            esp_err_t ret = pairing_manager_start();
-            if (ret != ESP_OK) {
-                ESP_LOGE(TAG, "Failed to start pairing mode: %s", esp_err_to_name(ret));
-                // Return to previous state
-                evaluate_and_transition();
-            }
+            ESP_LOGW(TAG, "Pairing Manager Not Implemented Yet");
             break;
         }
         default:

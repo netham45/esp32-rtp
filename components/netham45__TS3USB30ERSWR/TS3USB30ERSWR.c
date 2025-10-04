@@ -3,7 +3,7 @@
  * @brief USB switch control implementation for TS3USB30ERSWR
  */
 
-#include "usb_switch.h"
+#include "TS3USB30ERSWR.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
 

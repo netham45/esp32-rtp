@@ -15,11 +15,11 @@
 
 // Module headers
 #include "config/config_manager.h"
-#include "wifi/wifi_manager.h"
+#include "wifi_manager.h"
 #include "lifecycle_manager.h"
 #include "logging/log_buffer.h"
 #include "bq25895_integration.h"
-#include "TS3USB30ERSWR/usb_switch.h"
+#include "TS3USB30ERSWR.h"
 
 
 // Function to check if a GPIO pin is pressed (connected to ground)
