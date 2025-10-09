@@ -14,7 +14,7 @@
 esp_err_t lifecycle_services_init_wifi(void) {
     // Initialize WiFi FIRST to allocate GDMA channels for crypto before RMT claims them
     ESP_LOGI(TAG, "Initializing WiFi manager...");
-    heap_caps_print_heap_info(MALLOC_CAP_INTERNAL);
+    
     esp_err_t ret = lifecycle_wifi_adapter_init();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize WiFi manager: %s", esp_err_to_name(ret));
@@ -43,7 +43,7 @@ esp_err_t lifecycle_services_init_wifi(void) {
 esp_err_t lifecycle_services_init_web_server(void) {
     // Start the web server (works in both AP mode and STA mode)
     ESP_LOGI(TAG, "Starting web server for configuration...");
-    heap_caps_print_heap_info(MALLOC_CAP_INTERNAL);
+    
     web_server_start();
     return ESP_OK;
 }
@@ -52,7 +52,7 @@ esp_err_t lifecycle_services_init_spdif_receiver(void) {
     app_config_t *config = config_manager_get_config();
     if (config->device_mode == MODE_SENDER_SPDIF) {
         ESP_LOGI(TAG, "Initializing S/PDIF receiver with pin %d", config->spdif_data_pin);
-        heap_caps_print_heap_info(MALLOC_CAP_INTERNAL);
+        
         esp_err_t ret = spdif_receiver_init(6, NULL); // Use hardcoded pin from original implementation
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Failed to initialize S/PDIF receiver: %s", esp_err_to_name(ret));
@@ -88,7 +88,8 @@ esp_err_t lifecycle_services_init_mdns(void) {
     }
 
     // Start NTP client
-    // initialize_ntp_client(); // DISABLED: causing socket leak (errno 112)
+    ESP_LOGI(TAG, "Starting NTP client");
+    initialize_ntp_client(); // Socket leak issue fixed - now properly manages resources
 
     return ESP_OK;
 }

@@ -45,7 +45,7 @@ static void evaluate_and_transition(void);
  */
 static void handle_state_entry(lifecycle_state_t state) {
     ESP_LOGI(TAG, "LIFECYCLE: Entering state %d", state);
-    heap_caps_print_heap_info(MALLOC_CAP_INTERNAL);
+    
     
     switch (state) {
         case LIFECYCLE_STATE_HW_INIT: {
@@ -267,7 +267,7 @@ static void handle_state_awaiting_mode_config(lifecycle_event_t event) {
 
 static void handle_state_mode_sender_usb(lifecycle_event_t event) {
     ESP_LOGI(TAG, "LIFECYCLE: Handling state: MODE_SENDER_USB");
-    heap_caps_print_heap_info(MALLOC_CAP_INTERNAL);
+    
     if (event == LIFECYCLE_EVENT_CONFIGURATION_CHANGED) {
         // Use unified configuration handler to apply immediate changes
         bool restart_required = lifecycle_config_handle_configuration_changed();

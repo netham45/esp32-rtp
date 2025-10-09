@@ -46,6 +46,97 @@ config SAP_BUFFER_SIZE
     default 1024
 endmenu
 
+menu "RTCP Configuration"
+config RTCP_ENABLED
+    bool "Enable RTCP support"
+    default y
+    help
+        Enable RTCP (RTP Control Protocol) for media synchronization.
+        RTCP provides timing information from RTP senders and statistics
+        about the quality of reception.
+
+choice SYNC_MODE
+    prompt "Synchronization Mode"
+    default SYNC_MODE_ADAPTIVE
+    depends on RTCP_ENABLED
+    help
+        Select the synchronization mode for audio playout when RTCP timing is available.
+        
+    config SYNC_MODE_LEGACY
+        bool "Legacy (packet count based)"
+        help
+            Traditional packet count based buffering.
+            Ignores RTCP timing information even if available.
+            
+    config SYNC_MODE_STRICT
+        bool "Strict (drop late packets)"
+        help
+            Strict timing mode that drops packets arriving too late.
+            Provides best synchronization but may cause audio gaps.
+            
+    config SYNC_MODE_ADAPTIVE
+        bool "Adaptive (play late packets)"
+        help
+            Adaptive mode that plays late packets with a warning.
+            Balances synchronization with audio continuity.
+endchoice
+
+config MIN_FUTURE_BUFFER_MS
+    int "Minimum future buffer (ms)"
+    default 50
+    range 10 500
+    depends on RTCP_ENABLED && !SYNC_MODE_LEGACY
+    help
+        Minimum amount of future audio to maintain in buffer.
+        Ensures smooth playout by buffering ahead.
+
+config MAX_PLAYOUT_DELAY_MS
+    int "Maximum acceptable playout delay (ms)"
+    default 100
+    range 50 1000
+    depends on RTCP_ENABLED && !SYNC_MODE_LEGACY
+    help
+        Maximum delay before considering a packet too late.
+        Packets delayed beyond this are logged or dropped.
+
+config RTCP_RR_INTERVAL_MS
+    int "RTCP Receiver Report interval (ms)"
+    default 5000
+    range 1000 30000
+    depends on RTCP_ENABLED
+    help
+        How often to send RTCP Receiver Reports back to the sender.
+        RFC 3550 recommends 5 seconds as a reasonable default.
+
+config RTCP_TARGET_LATENCY_MS
+    int "Target playout latency (ms)"
+    default 50
+    range 10 500
+    depends on RTCP_ENABLED
+    help
+        Target latency for synchronized audio playout.
+        Lower values reduce delay but may cause dropouts.
+        Higher values increase buffering and stability.
+
+config RTCP_LOG_SYNC_INFO
+    bool "Log RTCP synchronization info"
+    default n
+    depends on RTCP_ENABLED
+    help
+        Enable logging of RTCP synchronization information.
+        This includes clock offset and playout timing details.
+        Useful for debugging but may be verbose.
+
+config RTCP_SEND_RR
+    bool "Send RTCP Receiver Reports"
+    default y
+    depends on RTCP_ENABLED
+    help
+        Send RTCP Receiver Reports (RR) back to the sender.
+        These reports contain reception statistics that help
+        the sender adapt to network conditions.
+endmenu
+
 
 menu "Features"
 config FEATURE_USB

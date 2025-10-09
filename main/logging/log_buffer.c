@@ -28,12 +28,13 @@ static log_buffer_t log_buffer = {
 };
 
 // Static buffer allocation to avoid fragmentation
-static char static_log_buffer[LOG_BUFFER_SIZE_DEFAULT];
+static char *static_log_buffer;
 
 // Forward declaration of custom vprintf handler
 static int log_buffer_vprintf(const char *fmt, va_list args);
 
 esp_err_t log_buffer_init(void) {
+    static_log_buffer = malloc(LOG_BUFFER_SIZE_DEFAULT);
     log_buffer_config_t config = {
         .buffer_size = LOG_BUFFER_SIZE_DEFAULT,
         .enable_serial_output = true,
@@ -380,6 +381,11 @@ esp_log_level_t log_buffer_get_min_level(void) {
 }
 
 void log_buffer_deinit(void) {
+    if (static_log_buffer) {
+        free(static_log_buffer);
+        static_log_buffer = NULL;
+    }
+
     if (!log_buffer.initialized) {
         return;
     }

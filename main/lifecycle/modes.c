@@ -85,7 +85,7 @@ static esp_err_t start_mode_sender_usb(void) {
     }
     
     // Initialize network sender first (reads from pcm_buffer)
-    heap_caps_print_heap_info(MALLOC_CAP_INTERNAL);
+    
     ret = rtp_sender_init();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize RTP sender: %s", esp_err_to_name(ret));
@@ -94,7 +94,7 @@ static esp_err_t start_mode_sender_usb(void) {
     
     // Initialize USB input (receives audio from host, writes to pcm_buffer)
     ESP_LOGI(TAG, "Initializing USB audio input (USB speaker device)");
-    heap_caps_print_heap_info(MALLOC_CAP_INTERNAL);
+    
     ret = usb_in_init(NULL);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize USB input: %s", esp_err_to_name(ret));
@@ -102,7 +102,7 @@ static esp_err_t start_mode_sender_usb(void) {
     }
 
     // Initialize visualizer for audio visualization
-    heap_caps_print_heap_info(MALLOC_CAP_INTERNAL);
+    
     ret = visualizer_init();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize visualizer: %s", esp_err_to_name(ret));
@@ -184,7 +184,7 @@ static esp_err_t start_mode_sender_spdif(void) {
     }
     
     ESP_LOGI(TAG, "Initializing Scream sender");
-    heap_caps_print_heap_info(MALLOC_CAP_INTERNAL);
+    
     ret = rtp_sender_init();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize Scream sender: %s", esp_err_to_name(ret));
@@ -253,11 +253,11 @@ static esp_err_t start_mode_receiver_usb(void) {
     setup_buffer();
 
     // Setup network receiver
-    heap_caps_print_heap_info(MALLOC_CAP_INTERNAL);
+    
     network_init();
 
     // Initialize and start SAP listener
-    heap_caps_print_heap_info(MALLOC_CAP_INTERNAL);
+    
     ret = sap_listener_init();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize SAP listener: %s", esp_err_to_name(ret));
@@ -271,7 +271,7 @@ static esp_err_t start_mode_receiver_usb(void) {
     }
 
     // Initialize USB host subsystem
-    heap_caps_print_heap_info(MALLOC_CAP_INTERNAL);
+    
     ret = usb_out_init();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize USB host: %s", esp_err_to_name(ret));
@@ -291,7 +291,7 @@ static esp_err_t start_mode_receiver_usb(void) {
     }
     
     // Initialize visualizer for audio visualization
-    heap_caps_print_heap_info(MALLOC_CAP_INTERNAL);
+    
     ret = visualizer_init();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize visualizer: %s", esp_err_to_name(ret));
@@ -364,7 +364,8 @@ static esp_err_t start_mode_receiver_spdif(void) {
     ESP_LOGI(TAG, "Initializing SPDIF output with pin %d and sample rate %lu",
         spdif_data_pin, sample_rate);
         
-    heap_caps_print_heap_info(MALLOC_CAP_INTERNAL);
+    //
+
     esp_err_t err = spdif_init(sample_rate, spdif_data_pin);
     if (err == ESP_OK) {
         ESP_LOGI(TAG, "SPDIF initialized successfully");
@@ -386,11 +387,11 @@ static esp_err_t start_mode_receiver_spdif(void) {
 
     
     // Setup network receiver
-    heap_caps_print_heap_info(MALLOC_CAP_INTERNAL);
+    
     network_init();
     
     // Initialize and start SAP listener
-    heap_caps_print_heap_info(MALLOC_CAP_INTERNAL);
+    
     ret = sap_listener_init();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize SAP listener: %s", esp_err_to_name(ret));
@@ -404,7 +405,7 @@ static esp_err_t start_mode_receiver_spdif(void) {
     }
     
     // Initialize visualizer for audio visualization
-    heap_caps_print_heap_info(MALLOC_CAP_INTERNAL);
+    
     ret = visualizer_init();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize visualizer: %s", esp_err_to_name(ret));

@@ -9,6 +9,7 @@
 #include "esp_log.h"
 #include "esp_wifi.h"
 #include "esp_err.h"
+#include "esp_timer.h"
 
 // External event group from lifecycle_manager.c
 extern EventGroupHandle_t s_network_activity_event_group;
@@ -16,7 +17,7 @@ extern EventGroupHandle_t s_network_activity_event_group;
 // Forward declarations for external audio tracking variables
 extern bool is_silent;
 extern uint32_t silence_duration_ms;
-extern TickType_t last_audio_time;
+extern uint64_t last_audio_time;
 
 // Get lifecycle context and state
 extern lifecycle_context_t* lifecycle_get_context(void);
@@ -204,7 +205,7 @@ void lifecycle_sleep_exit_silence_mode(void) {
     // Reset silence tracking variables to prevent immediate re-entry into sleep mode
     is_silent = false;
     silence_duration_ms = 0;
-    last_audio_time = xTaskGetTickCount(); // Reset to current time
+    last_audio_time = esp_timer_get_time() / 1000; // Reset to current time
     
     // Restart SAP listener if we're in a receiver mode
     lifecycle_state_t current_state = lifecycle_get_current_state();

@@ -89,6 +89,8 @@ static const int16_t bmc_tab[256] = {
 // initialize S/PDIF buffer
 static void spdif_buf_init(void)
 {
+    if (s_spdif.ptr)
+        return;
     int i;
     uint32_t bmc_mw = BMC_W;
 
@@ -157,7 +159,7 @@ esp_err_t spdif_init(int rate, int pin)
     s_spdif.started = false;
     s_spdif.rate = rate;
     s_spdif.pin = pin;
-return ESP_OK;
+    return ESP_OK;
 }
 
 esp_err_t spdif_start(void)

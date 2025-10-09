@@ -20,13 +20,13 @@ esp_err_t lifecycle_hw_init_nvs(void) {
 
 esp_err_t lifecycle_hw_init_config(void) {
     ESP_LOGI(TAG, "Initializing configuration manager");
-    heap_caps_print_heap_info(MALLOC_CAP_INTERNAL);
+    
     return config_manager_init();
 }
 
 esp_err_t lifecycle_hw_init_ota(void) {
     ESP_LOGI(TAG, "Initializing OTA manager");
-    heap_caps_print_heap_info(MALLOC_CAP_INTERNAL);
+    
     esp_err_t ota_err = ota_manager_init(NULL);  // Use default config
     if (ota_err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize OTA manager: %s", esp_err_to_name(ota_err));
@@ -55,7 +55,7 @@ esp_err_t lifecycle_hw_init_ota(void) {
 
 esp_err_t lifecycle_hw_init_battery(void) {
     ESP_LOGI(TAG, "Initializing BQ25895 battery charger");
-    heap_caps_print_heap_info(MALLOC_CAP_INTERNAL);
+    
     esp_err_t bq_err = bq25895_integration_init();
     if (bq_err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize BQ25895: %s", esp_err_to_name(bq_err));
