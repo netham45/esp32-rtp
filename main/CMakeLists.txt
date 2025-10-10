@@ -50,7 +50,6 @@ set (RECEIVER_SRCS
     "receiver/buffer.c"
     "receiver/network_in.c"
     "receiver/sap_listener.c"
-    "receiver/rtcp_receiver.c"
 )
 
 idf_component_register(SRCS "esp32-rtp.c"

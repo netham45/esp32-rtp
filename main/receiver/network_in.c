@@ -1,4 +1,4 @@
- // RTP packet structure: [12-byte RTP header] + [1152-byte PCM audio payload]
+// RTP packet structure: [12-byte RTP header] + [1152-byte PCM audio payload]
 // Total packet size: 1164 bytes
 
 #include "sdkconfig.h"
@@ -21,12 +21,9 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
-#include "esp_timer.h"
 #include "buffer.h"
 #include "config/config_manager.h"
 #include "pcm_visualizer.h"  // For pcm_viz_write
-#include "rtcp_receiver.h"   // For RTCP support
-#include "sdkconfig.h"       // For CONFIG_ values
 
 // RTP header structure (12 bytes) - matches sender format
 typedef struct __attribute__((packed)) {
@@ -133,7 +130,7 @@ static void close_multicast_socket(void) {
 
 static void udp_handler(void *pvParameters) {
     // RTP packet buffer - allocate enough for maximum possible RTP packet
-    char *rx_buffer = malloc(MAX_RTP_PACKET_SIZE);
+    char rx_buffer[MAX_RTP_PACKET_SIZE];
     struct sockaddr_in source_addr;
     socklen_t socklen = sizeof(source_addr);
     fd_set read_fds;
@@ -190,7 +187,7 @@ static void udp_handler(void *pvParameters) {
         }
 
         // Data is available, read it
-        int len = recvfrom(active_sock, rx_buffer, MAX_RTP_PACKET_SIZE, 0,
+        int len = recvfrom(active_sock, rx_buffer, sizeof(rx_buffer), 0,
                           (struct sockaddr *)&source_addr, &socklen);
 
         if (len < 0) {
@@ -289,14 +286,6 @@ static void udp_handler(void *pvParameters) {
         last_seq = seq;
         packets_received++;
 
-        // Update RTCP module with source address and RTP statistics
-        rtcp_receiver_set_source_addr(&source_addr);
-        
-        uint32_t rtp_timestamp = ntohl(rtp->timestamp);
-        int64_t arrival_time = esp_timer_get_time();
-        rtcp_receiver_update_rtp_stats(packets_received, packets_lost,
-                                       last_seq, rtp_timestamp, arrival_time);
-
         // Calculate payload length
         int payload_len = len - header_size;
         
@@ -332,76 +321,23 @@ static void udp_handler(void *pvParameters) {
         // Extract audio data pointer
         uint8_t *audio_data = (uint8_t *)&rx_buffer[header_size];
         
-        // Only process if we have the expected chunk size
+        // Convert from network byte order (big-endian) to host byte order (little-endian)
+        // RTP payload is s16be (signed 16-bit big-endian), ESP32 expects s16le
+        uint16_t *samples = (uint16_t *)audio_data;
+        int num_samples = payload_len / 2;  // 2 bytes per sample
+        
+        // Convert all samples from network byte order to host byte order
+        for (int i = 0; i < num_samples; i++) {
+            samples[i] = ntohs(samples[i]);
+        }
+        
+        // Only push to audio output if we have the expected chunk size
         // This maintains compatibility with existing audio pipeline
         if (payload_len == PCM_CHUNK_SIZE) {
-            // Create a temporary buffer for the converted audio
-            // We need to copy because push_chunk_with_timestamp may store the pointer
-            static uint8_t audio_buffer[PCM_CHUNK_SIZE];
-            
-            // Copy audio data to our buffer
-            memcpy(audio_buffer, audio_data, PCM_CHUNK_SIZE);
-            
-            // Convert from network byte order (big-endian) to host byte order (little-endian)
-            // RTP payload is s16be (signed 16-bit big-endian), ESP32 expects s16le
-            uint16_t *samples = (uint16_t *)audio_buffer;
-            int num_samples = PCM_CHUNK_SIZE / 2;  // 2 bytes per sample
-            
-            // Convert all samples from network byte order to host byte order
-            for (int i = 0; i < num_samples; i++) {
-                samples[i] = ntohs(samples[i]);
-            }
-            uint64_t playout_time_ms = 0;
-            
-            // Check RTCP synchronization info if available
-            if (rtcp_receiver_has_sync()) {
-                // Get the wall clock time for this RTP timestamp
-                if (rtcp_receiver_get_wall_time(rtp_timestamp, &playout_time_ms)) {
-                    // Add target latency from configuration
-                    #ifdef CONFIG_RTCP_TARGET_LATENCY_MS
-                        playout_time_ms += CONFIG_RTCP_TARGET_LATENCY_MS;
-                    #else
-                        playout_time_ms += 50;  // Fallback default
-                    #endif
-                    
-                    ESP_LOGD(TAG, "Packet scheduled for playout at %llu ms (RTP TS: %u)",
-                             playout_time_ms, rtp_timestamp);
-                } else {
-                    // rtcp_receiver_get_wall_time returned false - timestamp would underflow
-                    // Fall back to immediate playback
-                    static uint32_t underflow_warn_count = 0;
-                    if (++underflow_warn_count <= 10 || underflow_warn_count % 1000 == 0) {
-                        ESP_LOGW(TAG, "RTCP timestamp calculation failed for RTP TS %u - using immediate playback (count=%lu)",
-                                rtp_timestamp, underflow_warn_count);
-                    }
-                    playout_time_ms = 0;  // No sync - immediate playback
-                }
-                
-                // Calculate delay for monitoring
-                int32_t playout_delay = rtcp_receiver_calculate_playout_delay(rtp_timestamp, 48000);
-                
-                if (playout_delay > 200) {
-                    // Packet is very early, might want to increase buffering
-                    ESP_LOGD(TAG, "Packet early by %d ms (RTP TS: %u)", playout_delay, rtp_timestamp);
-                } else if (playout_delay < -100) {
-                    // Packet is very late
-                    ESP_LOGW(TAG, "Packet late by %d ms (RTP TS: %u)", -playout_delay, rtp_timestamp);
-                }
-                
-                // Log clock offset periodically for monitoring
-                static uint32_t offset_log_counter = 0;
-                if (++offset_log_counter >= 5000) {  // Every 5000 packets
-                    int64_t clock_offset = rtcp_receiver_get_clock_offset();
-                    ESP_LOGI(TAG, "RTCP sync active - Clock offset: %lld ms, playout scheduled", clock_offset);
-                    offset_log_counter = 0;
-                }
-            }
-            
             // Feed PCM data to visualizer (after RTP extraction and byte order conversion)
-            pcm_viz_write(audio_buffer, PCM_CHUNK_SIZE);
+            pcm_viz_write(audio_data, PCM_CHUNK_SIZE);
             
-            // Push with timestamp (0 if no sync available) - using our copy, not the rx_buffer
-            push_chunk_with_timestamp(audio_buffer, playout_time_ms, rtp_timestamp);
+            push_chunk(audio_data);
         } else {
             // For non-standard sizes, we'd need to buffer and repackage
             // Log this case so we know if it happens
@@ -431,33 +367,9 @@ static void udp_handler(void *pvParameters) {
 }
 
 esp_err_t network_init(void) {
-    ESP_LOGI(TAG, "========================================");
     ESP_LOGI(TAG, "Starting network receiver (RTP mode)");
-    ESP_LOGI(TAG, "========================================");
     
     create_udp_server();
-    
-    // Initialize RTCP receiver
-    app_config_t* config = config_manager_get_config();
-    uint16_t port = config ? config->port : UDP_PORT;
-    
-    ESP_LOGI(TAG, "Initializing RTCP receiver...");
-    ESP_LOGI(TAG, "  RTP port: %d", port);
-    ESP_LOGI(TAG, "  RTCP port: %d", port + 1);
-    
-    esp_err_t rtcp_ret = rtcp_receiver_init(port);
-    if (rtcp_ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to initialize RTCP receiver: %s", esp_err_to_name(rtcp_ret));
-    } else {
-        ESP_LOGI(TAG, "RTCP receiver initialized successfully");
-        
-        rtcp_ret = rtcp_receiver_start();
-        if (rtcp_ret != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to start RTCP receiver task: %s", esp_err_to_name(rtcp_ret));
-        } else {
-            ESP_LOGI(TAG, "RTCP receiver task started successfully");
-        }
-    }
 
     xTaskCreatePinnedToCore(udp_handler, "udp_handler", 8192, NULL,
                            5, &udp_handler_task, 1);
@@ -465,10 +377,7 @@ esp_err_t network_init(void) {
     // SAP listener functionality moved to sap_listener module
     // It will be started by the lifecycle manager
 
-    ESP_LOGI(TAG, "Network receiver started with RTCP support enabled");
-    ESP_LOGI(TAG, "Waiting for RTP packets on port %d", port);
-    ESP_LOGI(TAG, "Waiting for RTCP packets on port %d", port + 1);
-    ESP_LOGI(TAG, "========================================");
+    ESP_LOGI(TAG, "Network receiver started");
     return ESP_OK;
 }
 
@@ -582,9 +491,6 @@ esp_err_t network_join_multicast(const char* multicast_ip, uint16_t port, uint32
 
     multicast_config.enabled = true;
     ESP_LOGI(TAG, "Successfully joined multicast group %s:%d (unicast socket remains active)", multicast_ip, port);
-    
-    // Also join RTCP multicast group
-    rtcp_receiver_join_multicast(multicast_ip, port);
 
     return ESP_OK;
 }
@@ -616,10 +522,6 @@ esp_err_t network_leave_multicast(void) {
     memset(multicast_config.multicast_ip, 0, sizeof(multicast_config.multicast_ip));
 
     ESP_LOGI(TAG, "Left multicast group (unicast socket remains active)");
-    
-    // Also leave RTCP multicast group
-    rtcp_receiver_leave_multicast();
-    
     return ESP_OK;
 }
 
@@ -766,10 +668,6 @@ esp_err_t network_deinit(void) {
         vTaskDelete(udp_handler_task);
         udp_handler_task = NULL;
     }
-    
-    // Stop RTCP receiver
-    rtcp_receiver_stop();
-    rtcp_receiver_deinit();
     
     close_udp_server();
     close_multicast_socket();
