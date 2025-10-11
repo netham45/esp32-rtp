@@ -63,6 +63,11 @@ typedef struct {
     uint32_t discovery_interval_ms;        // Discovery scan interval in milliseconds
     bool auto_select_best_device;          // Automatically select best available device
     uint32_t mdns_discovery_interval_ms;   // mDNS discovery interval in milliseconds (default 10000)
+
+    // NTP configuration
+    bool ntp_screamrouter_mode;            // true: discover screamrouter via mDNS; false: use custom server
+    char ntp_server_host[64];              // Custom NTP server hostname/IP when not in screamrouter mode
+    uint16_t ntp_server_port;              // NTP server port (default 123)
     
     // Setup wizard status
     bool setup_wizard_completed;           // Whether the setup wizard has been completed

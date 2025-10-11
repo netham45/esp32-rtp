@@ -91,5 +91,9 @@ esp_err_t lifecycle_services_init_mdns(void) {
     ESP_LOGI(TAG, "Starting NTP client");
     initialize_ntp_client(); // Socket leak issue fixed - now properly manages resources
 
+    // Apply initial NTP configuration (screamrouter via mDNS or custom server)
+    app_config_t *cfg = config_manager_get_config();
+    ntp_client_set_config(cfg->ntp_screamrouter_mode, cfg->ntp_server_host, cfg->ntp_server_port);
+    
     return ESP_OK;
 }

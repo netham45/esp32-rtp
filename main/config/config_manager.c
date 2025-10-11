@@ -58,6 +58,10 @@ static app_config_t s_app_config;
 // SAP keys
 #define NVS_KEY_SAP_STREAM_NAME "sap_stream"
 
+// NTP configuration keys
+#define NVS_KEY_NTP_SCREAMROUTER "ntp_mdns"
+#define NVS_KEY_NTP_SERVER_HOST  "ntp_host"
+#define NVS_KEY_NTP_SERVER_PORT  "ntp_srv_port"
 /**
  * Initialize with default values from config.h
  */
@@ -128,6 +132,12 @@ static void set_default_config(void) {
     s_app_config.enable_mdns_discovery = true;       // Enable mDNS discovery by default
     s_app_config.discovery_interval_ms = 30000;      // 30 seconds default interval
     s_app_config.auto_select_best_device = false;    // Manual selection by default
+    
+    // NTP defaults
+    s_app_config.ntp_screamrouter_mode = true;
+    strncpy(s_app_config.ntp_server_host, "pool.ntp.org", sizeof(s_app_config.ntp_server_host) - 1);
+    s_app_config.ntp_server_host[sizeof(s_app_config.ntp_server_host) - 1] = '\0';
+    s_app_config.ntp_server_port = 123;
     
     // Setup wizard defaults
     s_app_config.setup_wizard_completed = false;     // Wizard not completed by default
@@ -326,6 +336,21 @@ esp_err_t config_manager_init(void) {
     err = nvs_get_u8(nvs_handle, NVS_KEY_AUTO_SELECT_DEVICE, &u8_value);
     if (err == ESP_OK) {
         s_app_config.auto_select_best_device = (bool)u8_value;
+    }
+
+    // Read NTP settings
+    err = nvs_get_u8(nvs_handle, NVS_KEY_NTP_SCREAMROUTER, &u8_value);
+    if (err == ESP_OK) {
+        s_app_config.ntp_screamrouter_mode = (bool)u8_value;
+    }
+    size_t host_len = sizeof(s_app_config.ntp_server_host);
+    err = nvs_get_str(nvs_handle, NVS_KEY_NTP_SERVER_HOST, s_app_config.ntp_server_host, &host_len);
+    if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGE(TAG, "Error reading NTP server host: %s", esp_err_to_name(err));
+    }
+    err = nvs_get_u16(nvs_handle, NVS_KEY_NTP_SERVER_PORT, &u16_value);
+    if (err == ESP_OK) {
+        s_app_config.ntp_server_port = u16_value;
     }
     
     // Read setup wizard status
@@ -652,6 +677,26 @@ esp_err_t config_manager_save_config(void) {
         nvs_close(nvs_handle);
         return err;
     }
+
+    // Save NTP settings
+    err = nvs_set_u8(nvs_handle, NVS_KEY_NTP_SCREAMROUTER, (uint8_t)s_app_config.ntp_screamrouter_mode);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Error saving NTP screamrouter mode: %s", esp_err_to_name(err));
+        nvs_close(nvs_handle);
+        return err;
+    }
+    err = nvs_set_str(nvs_handle, NVS_KEY_NTP_SERVER_HOST, s_app_config.ntp_server_host);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Error saving NTP server host: %s", esp_err_to_name(err));
+        nvs_close(nvs_handle);
+        return err;
+    }
+    err = nvs_set_u16(nvs_handle, NVS_KEY_NTP_SERVER_PORT, s_app_config.ntp_server_port);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Error saving NTP server port: %s", esp_err_to_name(err));
+        nvs_close(nvs_handle);
+        return err;
+    }
     
     // Save setup wizard status
     err = nvs_set_u8(nvs_handle, NVS_KEY_SETUP_WIZARD_COMPLETED, (uint8_t)s_app_config.setup_wizard_completed);
@@ -839,6 +884,16 @@ esp_err_t config_manager_save_setting(const char* key, void* value, size_t size)
         // Also save the legacy fields to NVS
         nvs_set_u8(nvs_handle, NVS_KEY_ENABLE_USB_SENDER, (uint8_t)s_app_config.enable_usb_sender);
         nvs_set_u8(nvs_handle, NVS_KEY_ENABLE_SPDIF_SENDER, (uint8_t)s_app_config.enable_spdif_sender);
+    } else if (strcmp(key, NVS_KEY_NTP_SCREAMROUTER) == 0 && size == sizeof(bool)) {
+        s_app_config.ntp_screamrouter_mode = *(bool*)value;
+        err = nvs_set_u8(nvs_handle, key, (uint8_t)s_app_config.ntp_screamrouter_mode);
+    } else if (strcmp(key, NVS_KEY_NTP_SERVER_HOST) == 0) {
+        strncpy(s_app_config.ntp_server_host, (char*)value, sizeof(s_app_config.ntp_server_host) - 1);
+        s_app_config.ntp_server_host[sizeof(s_app_config.ntp_server_host) - 1] = '\0';
+        err = nvs_set_str(nvs_handle, key, s_app_config.ntp_server_host);
+    } else if (strcmp(key, NVS_KEY_NTP_SERVER_PORT) == 0 && size == sizeof(uint16_t)) {
+        s_app_config.ntp_server_port = *(uint16_t*)value;
+        err = nvs_set_u16(nvs_handle, key, s_app_config.ntp_server_port);
     } else {
         err = ESP_ERR_INVALID_ARG;
     }

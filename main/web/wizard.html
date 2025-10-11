@@ -236,6 +236,40 @@
                             <p id="ap-name-preview" style="margin-bottom: 0; font-size: 14px;"></p>
                         </div>
                     </div>
+
+                    <hr style="margin: 20px 0; border: none; border-top: 1px solid #e0e0e0;">
+
+                    <div id="ntp-config-section">
+                        <h4 style="margin: 0 0 10px 0;">Time Sync (NTP)</h4>
+
+                        <div class="wizard-form-group">
+                            <label style="display:block; margin-bottom:8px;">Select NTP Mode:</label>
+                            <label style="margin-right:15px;">
+                                <input type="radio" name="ntp-mode" value="screamrouter" onchange="toggleNtpMode(false)" checked>
+                                ScreamRouter via mDNS
+                            </label>
+                            <label>
+                                <input type="radio" name="ntp-mode" value="custom" onchange="toggleNtpMode(true)">
+                                Custom server
+                            </label>
+                        </div>
+
+                        <div id="ntp-custom-section" style="display:none;">
+                            <div class="wizard-form-group">
+                                <label for="ntp-host">NTP Server Hostname:</label>
+                                <input type="text" id="ntp-host" placeholder="pool.ntp.org">
+                            </div>
+                            <div class="wizard-form-group">
+                                <label for="ntp-port">NTP Port:</label>
+                                <input type="number" id="ntp-port" value="123" min="1" max="65535">
+                                <p class="setting-description" style="font-size: 12px; color: #666; margin-top: 5px;">
+                                    Default is 123. Only change if your NTP server listens on a non-standard port.
+                                </p>
+                            </div>
+                        </div>
+
+                        <div class="validation-error" id="ntp-error">Please enter a valid NTP host and port (1-65535)</div>
+                    </div>
                     
                     <div class="validation-error" id="wifi-error">Please enter a network name (SSID) or select AP-Only mode</div>
                 </div>

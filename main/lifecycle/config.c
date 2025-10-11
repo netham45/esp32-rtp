@@ -14,6 +14,7 @@
 #include "esp_log.h"
 #include "esp_wifi.h"
 #include <string.h>
+#include "ntp_client.h"
 
 
 // Forward declarations for reconfiguration functions
@@ -160,6 +161,22 @@ uint32_t lifecycle_get_discovery_interval_ms(void) {
 bool lifecycle_get_auto_select_best_device(void) {
     app_config_t *config = config_manager_get_config();
     return config->auto_select_best_device;
+}
+
+// ----- NTP configuration getters -----
+bool lifecycle_get_ntp_screamrouter_mode(void) {
+    app_config_t *config = config_manager_get_config();
+    return config->ntp_screamrouter_mode;
+}
+
+const char* lifecycle_get_ntp_server_host(void) {
+    app_config_t *config = config_manager_get_config();
+    return config->ntp_server_host;
+}
+
+uint16_t lifecycle_get_ntp_server_port(void) {
+    app_config_t *config = config_manager_get_config();
+    return config->ntp_server_port;
 }
 
 // ============================================================================
@@ -635,6 +652,55 @@ esp_err_t lifecycle_set_auto_select_best_device(bool enable) {
     return ESP_OK;
 }
 
+// ----- NTP configuration setters -----
+esp_err_t lifecycle_set_ntp_screamrouter_mode(bool enable) {
+    app_config_t *config = config_manager_get_config();
+    if (config->ntp_screamrouter_mode != enable) {
+        ESP_LOGI(TAG, "Setting NTP screamrouter (mDNS) mode to %d", enable);
+        config->ntp_screamrouter_mode = enable;
+        esp_err_t ret = config_manager_save_setting("ntp_mdns", &enable, sizeof(enable));
+        if (ret == ESP_OK) {
+            // Reconfigure NTP client immediately
+            ntp_client_set_config(config->ntp_screamrouter_mode, config->ntp_server_host, config->ntp_server_port);
+            lifecycle_manager_post_event(LIFECYCLE_EVENT_CONFIGURATION_CHANGED);
+        }
+        return ret;
+    }
+    return ESP_OK;
+}
+
+esp_err_t lifecycle_set_ntp_server_host(const char* host) {
+    if (!host) return ESP_ERR_INVALID_ARG;
+    app_config_t *config = config_manager_get_config();
+    if (strcmp(config->ntp_server_host, host) != 0) {
+        ESP_LOGI(TAG, "Setting NTP server host to %s", host);
+        strncpy(config->ntp_server_host, host, sizeof(config->ntp_server_host) - 1);
+        config->ntp_server_host[sizeof(config->ntp_server_host) - 1] = '\0';
+        esp_err_t ret = config_manager_save_setting("ntp_host", config->ntp_server_host, sizeof(config->ntp_server_host));
+        if (ret == ESP_OK) {
+            ntp_client_set_config(config->ntp_screamrouter_mode, config->ntp_server_host, config->ntp_server_port);
+            lifecycle_manager_post_event(LIFECYCLE_EVENT_CONFIGURATION_CHANGED);
+        }
+        return ret;
+    }
+    return ESP_OK;
+}
+
+esp_err_t lifecycle_set_ntp_server_port(uint16_t port) {
+    app_config_t *config = config_manager_get_config();
+    if (config->ntp_server_port != port) {
+        ESP_LOGI(TAG, "Setting NTP server port to %u", port);
+        config->ntp_server_port = port;
+        esp_err_t ret = config_manager_save_setting("ntp_srv_port", &port, sizeof(port));
+        if (ret == ESP_OK) {
+            ntp_client_set_config(config->ntp_screamrouter_mode, config->ntp_server_host, config->ntp_server_port);
+            lifecycle_manager_post_event(LIFECYCLE_EVENT_CONFIGURATION_CHANGED);
+        }
+        return ret;
+    }
+    return ESP_OK;
+}
+
 // ============================================================================
 // BATCH UPDATE FUNCTION
 // Batch update implementation
@@ -756,6 +822,18 @@ esp_err_t lifecycle_update_config_batch(const lifecycle_config_update_t* updates
         config->auto_select_best_device = updates->auto_select_best_device;
     }
 
+    // NTP configuration updates
+    if (updates->update_ntp_screamrouter_mode) {
+        config->ntp_screamrouter_mode = updates->ntp_screamrouter_mode;
+    }
+    if (updates->update_ntp_server_host && updates->ntp_server_host) {
+        strncpy(config->ntp_server_host, updates->ntp_server_host, sizeof(config->ntp_server_host) - 1);
+        config->ntp_server_host[sizeof(config->ntp_server_host) - 1] = '\0';
+    }
+    if (updates->update_ntp_server_port) {
+        config->ntp_server_port = updates->ntp_server_port;
+    }
+ 
     // Setup wizard status (normally handled earlier by caller, but support here too)
     if (updates->update_setup_wizard_completed) {
         config->setup_wizard_completed = updates->setup_wizard_completed;
@@ -1010,6 +1088,21 @@ bool lifecycle_config_handle_configuration_changed(void) {
                 esp_wifi_set_mode(WIFI_MODE_APSTA);
             }
         }
+    }
+
+    // NTP configuration changes
+    if (current_config->ntp_screamrouter_mode != previous_config.ntp_screamrouter_mode ||
+        strcmp(current_config->ntp_server_host, previous_config.ntp_server_host) != 0 ||
+        current_config->ntp_server_port != previous_config.ntp_server_port) {
+        ESP_LOGI(TAG, "NTP configuration changed: mdns=%d host=%s port=%u",
+                 current_config->ntp_screamrouter_mode,
+                 current_config->ntp_server_host,
+                 (unsigned)current_config->ntp_server_port);
+        any_changes = true;
+        // Apply to running NTP client
+        ntp_client_set_config(current_config->ntp_screamrouter_mode,
+                              current_config->ntp_server_host,
+                              current_config->ntp_server_port);
     }
 
     // Update previous config snapshot

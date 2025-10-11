@@ -123,6 +123,11 @@ typedef struct __attribute__((packed)) {
      // Activity tracking for multi-SSRC hygiene
      uint64_t last_activity_mono_us;  // updated on SR receipt and RTP packet observe
      bool     preferred_pin;          // user/system pin to prevent eviction (default false)
+
+     // Stable NTP→monotonic baseline for multi-speaker sync (established at RTCP lock)
+     uint64_t ntp_to_mono_baseline_ntp_us;   // Receiver NTP time at baseline establishment
+     uint64_t ntp_to_mono_baseline_mono_us;  // Receiver monotonic time at baseline establishment
+     bool     ntp_to_mono_baseline_valid;    // Whether baseline has been established
  } rtcp_sync_info_t;
 
 // RTCP receiver state

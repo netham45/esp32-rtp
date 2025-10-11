@@ -90,6 +90,15 @@ bool ntp_get_pll_state(double *offset_us, double *skew_ppm);
  * @note This is a blocking call that takes ~100ms to complete (burst + network latency).
  *       The background task already does this periodically (5 Hz initially, then 1 Hz).
  */
+/**
+ * @brief Dynamically set NTP client configuration
+ *
+ * When use_mdns is true, the client will mDNS-resolve "screamrouter.local" periodically.
+ * When false, the client will resolve and use the provided host and use 'port' for micro-probes.
+ * Note: SNTP uses port 123 internally; 'port' applies to precision micro-probes only.
+ */
+void ntp_client_set_config(bool use_mdns, const char* host, uint16_t port);
+
 bool ntp_trigger_probe();
 
 #ifdef __cplusplus

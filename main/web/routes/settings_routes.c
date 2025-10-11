@@ -63,6 +63,11 @@ static esp_err_t settings_get_handler(httpd_req_t *req)
     cJSON_AddStringToObject(root, "sender_destination_ip", lifecycle_get_sender_destination_ip());
     cJSON_AddNumberToObject(root, "sender_destination_port", lifecycle_get_sender_destination_port());
     
+    // NTP settings
+    cJSON_AddBoolToObject(root, "ntp_screamrouter_mode", lifecycle_get_ntp_screamrouter_mode());
+    cJSON_AddStringToObject(root, "ntp_server_host", lifecycle_get_ntp_server_host());
+    cJSON_AddNumberToObject(root, "ntp_server_port", lifecycle_get_ntp_server_port());
+    
     // Sleep settings
     cJSON_AddNumberToObject(root, "silence_threshold_ms", lifecycle_get_silence_threshold_ms());
     cJSON_AddNumberToObject(root, "network_check_interval_ms", lifecycle_get_network_check_interval_ms());
@@ -357,6 +362,23 @@ static esp_err_t settings_post_handler(httpd_req_t *req)
         ESP_LOGI(TAG, "SAP stream name updated to: %s", updates.sap_stream_name);
     }
     
+    // NTP configuration
+    cJSON *ntp_mdns = cJSON_GetObjectItem(root, "ntp_screamrouter_mode");
+    if (ntp_mdns && cJSON_IsBool(ntp_mdns)) {
+        updates.update_ntp_screamrouter_mode = true;
+        updates.ntp_screamrouter_mode = cJSON_IsTrue(ntp_mdns);
+    }
+    cJSON *ntp_host = cJSON_GetObjectItem(root, "ntp_server_host");
+    if (ntp_host && cJSON_IsString(ntp_host)) {
+        updates.update_ntp_server_host = true;
+        updates.ntp_server_host = ntp_host->valuestring;
+    }
+    cJSON *ntp_port = cJSON_GetObjectItem(root, "ntp_server_port");
+    if (ntp_port && cJSON_IsNumber(ntp_port)) {
+        updates.update_ntp_server_port = true;
+        updates.ntp_server_port = (uint16_t)ntp_port->valueint;
+    }
+
     // Handle setup wizard completed flag
     cJSON *setup_wizard_completed = cJSON_GetObjectItem(root, "setup_wizard_completed");
     esp_err_t err = ESP_OK;

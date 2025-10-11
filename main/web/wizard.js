@@ -15,6 +15,10 @@ const wizard = {
         senderPort: 4010,
         selectedReceiver: null,
         spdifDataPin: 17,
+        // NTP configuration for time sync
+        ntpScreamrouterMode: true, // true = mDNS screamrouter; false = custom
+        ntpHost: '',
+        ntpPort: 123,
         apSettings: {
             ssid: 'ESP32-Scream',
             password: '',
@@ -301,6 +305,21 @@ function setupStep4_NetworkConfig() {
     
     // Show/hide sections based on mode
     toggleNetworkMode(wizard.data.apOnlyMode);
+
+    // NTP UI: radios and inputs
+    const ntpScreamRadio = document.querySelector('input[name="ntp-mode"][value="screamrouter"]');
+    const ntpCustomRadio = document.querySelector('input[name="ntp-mode"][value="custom"]');
+    if (wizard.data.ntpScreamrouterMode) {
+        if (ntpScreamRadio) ntpScreamRadio.checked = true;
+        toggleNtpMode(false);
+    } else {
+        if (ntpCustomRadio) ntpCustomRadio.checked = true;
+        toggleNtpMode(true);
+    }
+    const ntpHostInput = document.getElementById('ntp-host');
+    const ntpPortInput = document.getElementById('ntp-port');
+    if (ntpHostInput) ntpHostInput.value = wizard.data.ntpHost || '';
+    if (ntpPortInput) ntpPortInput.value = wizard.data.ntpPort || 123;
     
     // Update AP name preview if in AP-only mode
     if (wizard.data.apOnlyMode && wizard.data.apSettings.ssid) {
@@ -358,6 +377,13 @@ function setupStep5_Review() {
     summaryHtml += `<li><strong>Access Point Name:</strong> ${wizard.data.apSettings.ssid}</li>`;
     if (wizard.data.apOnlyMode) {
         summaryHtml += '<li><strong>Access Point:</strong> Always Active</li>';
+    }
+
+    // NTP summary
+    if (wizard.data.ntpScreamrouterMode) {
+        summaryHtml += '<li><strong>NTP:</strong> ScreamRouter via mDNS</li>';
+    } else {
+        summaryHtml += `<li><strong>NTP:</strong> ${wizard.data.ntpHost || 'Custom'}:${wizard.data.ntpPort || 123}</li>`;
     }
     
     summaryEl.innerHTML = summaryHtml;
@@ -506,8 +532,17 @@ function toggleNetworkMode(isAPOnly) {
         document.getElementById('ap-mode-label').style.borderColor = '#e0e0e0';
     }
 }
-
-function formatModeName(mode) {
+ 
+// Toggle NTP mode (custom vs screamrouter mDNS)
+function toggleNtpMode(isCustom) {
+    wizard.data.ntpScreamrouterMode = !isCustom;
+    const section = document.getElementById('ntp-custom-section');
+    if (section) {
+        section.style.display = isCustom ? 'block' : 'none';
+    }
+}
+ 
+ function formatModeName(mode) {
     const modeNames = {
         'receiver-usb': '🔊 USB Receiver',
         'receiver-spdif': '🔊 S/PDIF Receiver',
@@ -729,6 +764,24 @@ function validateCurrentStep() {
                     wizard.data.ssid = '';
                     wizard.data.password = '';
                 }
+
+                // NTP configuration (validate and capture)
+                const ntpMode = document.querySelector('input[name="ntp-mode"]:checked')?.value;
+                const isCustomNtp = (ntpMode === 'custom');
+                wizard.data.ntpScreamrouterMode = !isCustomNtp;
+                if (isCustomNtp) {
+                    const host = (document.getElementById('ntp-host')?.value || '').trim();
+                    const port = parseInt(document.getElementById('ntp-port')?.value);
+                    if (!host || isNaN(port) || port < 1 || port > 65535) {
+                        showWizardError('ntp-error', 'Please enter a valid NTP host and port (1-65535)');
+                        return false;
+                    }
+                    wizard.data.ntpHost = host;
+                    wizard.data.ntpPort = port;
+                } else {
+                    wizard.data.ntpHost = '';
+                    wizard.data.ntpPort = 123;
+                }
             }
             break;
             
@@ -758,6 +811,24 @@ function validateCurrentStep() {
                     // AP-Only mode - clear WiFi credentials
                     wizard.data.ssid = '';
                     wizard.data.password = '';
+                }
+
+                // NTP configuration (validate and capture) for SPDIF flow at this step
+                const ntpMode = document.querySelector('input[name="ntp-mode"]:checked')?.value;
+                const isCustomNtp = (ntpMode === 'custom');
+                wizard.data.ntpScreamrouterMode = !isCustomNtp;
+                if (isCustomNtp) {
+                    const host = (document.getElementById('ntp-host')?.value || '').trim();
+                    const port = parseInt(document.getElementById('ntp-port')?.value);
+                    if (!host || isNaN(port) || port < 1 || port > 65535) {
+                        showWizardError('ntp-error', 'Please enter a valid NTP host and port (1-65535)');
+                        return false;
+                    }
+                    wizard.data.ntpHost = host;
+                    wizard.data.ntpPort = port;
+                } else {
+                    wizard.data.ntpHost = '';
+                    wizard.data.ntpPort = 123;
                 }
             }
             // Non-SPDIF flow: step 5 is review, no validation
@@ -888,8 +959,16 @@ function completeWizard() {
         ap_ssid: wizard.data.apSettings.ssid,
         ap_password: wizard.data.apSettings.password,
         spdif_data_pin: (wizard.data.spdifDataPin !== undefined ? wizard.data.spdifDataPin : 17),
-        hide_ap_when_connected: wizard.data.apOnlyMode ? false : wizard.data.apSettings.hideWhenConnected
+        hide_ap_when_connected: wizard.data.apOnlyMode ? false : wizard.data.apSettings.hideWhenConnected,
+        // NTP settings
+        ntp_screamrouter_mode: wizard.data.ntpScreamrouterMode
     };
+
+    // If custom NTP, include host/port
+    if (!wizard.data.ntpScreamrouterMode) {
+        settings.ntp_server_host = wizard.data.ntpHost || '';
+        settings.ntp_server_port = wizard.data.ntpPort || 123;
+    }
     
     // Add mode-specific settings (audio configuration)
     if (wizard.data.mode === 'receiver-usb' || wizard.data.mode === 'receiver-spdif') {
@@ -973,6 +1052,15 @@ function fetchDeviceCapabilities() {
             wizard.data.apSettings.password = settings.ap_password || '';
             wizard.data.apSettings.hideWhenConnected = settings.hide_ap_when_connected || false;
 
+            // NTP
+            if (typeof settings.ntp_screamrouter_mode === 'boolean') {
+                wizard.data.ntpScreamrouterMode = settings.ntp_screamrouter_mode;
+            } else {
+                wizard.data.ntpScreamrouterMode = true;
+            }
+            wizard.data.ntpHost = settings.ntp_server_host || '';
+            wizard.data.ntpPort = settings.ntp_server_port || 123;
+
             // Get current WiFi credentials if available
             if (settings.ssid && settings.ssid.length > 0) {
                 wizard.data.ssid = settings.ssid;
@@ -1023,3 +1111,4 @@ window.wizardNext = wizardNext;
 window.wizardPrevious = wizardPrevious;
 window.wizardSkip = wizardSkip;
 window.closeWizard = closeWizard;
+window.toggleNtpMode = toggleNtpMode;

@@ -12,6 +12,8 @@
 #include "esp_netif.h"
 #include "lwip/ip4_addr.h"
 #include "lwip/sockets.h"
+#include "lwip/netdb.h"
+#include "lwip/inet.h"
 #include "time.h"
 #include "mdns.h"
 
@@ -36,6 +38,11 @@ static const char *TAG = "ntp_client";
 static TaskHandle_t ntp_client_task_handle = NULL;
 static bool ntp_client_initialized = false;
 static bool sntp_initialized = false;
+
+// Runtime configuration
+static bool s_use_mdns = true;            // true: resolve screamrouter via mDNS
+static char s_custom_host[64] = {0};      // custom server hostname/IP when not using mDNS
+static uint16_t s_custom_port = 123;      // micro-probe UDP port (SNTP always uses 123)
 
 // DNS cache structure
 typedef struct {
@@ -94,7 +101,7 @@ static SemaphoreHandle_t pll_mutex = NULL;
  * @param sample Output sample structure
  * @return true if successful, false otherwise
  */
-static bool ntp_query_single(const char *server_ip, ntp_sample_t *sample) {
+static bool ntp_query_single(const char *server_ip, ntp_sample_t *sample, uint16_t port) {
     if (!server_ip || !sample) return false;
 
     sample->valid = false;
@@ -114,7 +121,7 @@ static bool ntp_query_single(const char *server_ip, ntp_sample_t *sample) {
     memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
     server_addr.sin_addr.s_addr = inet_addr(server_ip);
-    server_addr.sin_port = htons(NTP_SERVER_PORT);
+    server_addr.sin_port = htons(port);
 
     // Prepare NTP request packet (48 bytes)
     uint8_t ntp_packet[48];
@@ -181,7 +188,7 @@ static bool ntp_query_single(const char *server_ip, ntp_sample_t *sample) {
  * @param best_sample Output: best (min-RTT) sample from the burst
  * @return true if at least one valid sample was obtained
  */
-static bool ntp_micro_probe_burst(const char *server_ip, ntp_sample_t *best_sample) {
+static bool ntp_micro_probe_burst(const char *server_ip, uint16_t port, ntp_sample_t *best_sample) {
     if (!server_ip || !best_sample) return false;
 
     best_sample->valid = false;
@@ -190,7 +197,7 @@ static bool ntp_micro_probe_burst(const char *server_ip, ntp_sample_t *best_samp
 
     for (int i = 0; i < NTP_PROBE_BURST_SIZE; i++) {
         ntp_sample_t sample;
-        if (ntp_query_single(server_ip, &sample) && sample.valid) {
+        if (ntp_query_single(server_ip, &sample, port) && sample.valid) {
             valid_count++;
 
             // Keep the sample with minimum RTT
@@ -392,44 +399,95 @@ static void ntp_client_task(void *pvParameters) {
             if ((now - last_mdns_check) >= pdMS_TO_TICKS(MDNS_CHECK_INTERVAL_MS)) {
                 char new_ip[46] = {0};
 
-                // Query mDNS for screamrouter
-                if (query_mdns_for_ntp_server(new_ip, sizeof(new_ip))) {
-                    // Check if IP changed
-                    if (strcmp(dns_cache.ip_address, new_ip) != 0) {
-                        ip_changed = true;
-                        strncpy(ntp_server_address, new_ip, sizeof(ntp_server_address) - 1);
-                        ntp_server_address[sizeof(ntp_server_address) - 1] = '\0';
+                if (s_use_mdns) {
+                    // Query mDNS for screamrouter
+                    if (query_mdns_for_ntp_server(new_ip, sizeof(new_ip))) {
+                        // Check if IP changed
+                        if (strcmp(dns_cache.ip_address, new_ip) != 0) {
+                            ip_changed = true;
+                            strncpy(ntp_server_address, new_ip, sizeof(ntp_server_address) - 1);
+                            ntp_server_address[sizeof(ntp_server_address) - 1] = '\0';
 
-                        // Update DNS cache
-                        strncpy(dns_cache.ip_address, new_ip, sizeof(dns_cache.ip_address) - 1);
-                        dns_cache.ip_address[sizeof(dns_cache.ip_address) - 1] = '\0';
-                        dns_cache.valid = true;
-                        dns_cache.failure_count = 0;
-                        ip_found = true;
+                            // Update DNS cache
+                            strncpy(dns_cache.ip_address, new_ip, sizeof(dns_cache.ip_address) - 1);
+                            dns_cache.ip_address[sizeof(dns_cache.ip_address) - 1] = '\0';
+                            dns_cache.valid = true;
+                            dns_cache.failure_count = 0;
+                            ip_found = true;
 
-                        ESP_LOGI(TAG, "NTP server IP updated and cached: %s", ntp_server_address);
+                            ESP_LOGI(TAG, "NTP server IP updated and cached (mDNS): %s", ntp_server_address);
 
-                        // Reset PLL on server change
-                        xSemaphoreTake(pll_mutex, portMAX_DELAY);
-                        pll.valid = false;
-                        pll.sample_count = 0;
-                        probe_count = 0;  // Restart fast probing
-                        xSemaphoreGive(pll_mutex);
+                            // Reset PLL on server change
+                            xSemaphoreTake(pll_mutex, portMAX_DELAY);
+                            pll.valid = false;
+                            pll.sample_count = 0;
+                            probe_count = 0;  // Restart fast probing
+                            xSemaphoreGive(pll_mutex);
+                        } else {
+                            ip_found = true;
+                        }
                     } else {
-                        ip_found = true;
+                        // mDNS query failed
+                        dns_cache.failure_count++;
+                        ESP_LOGD(TAG, "mDNS query failure, failure count: %d/%d",
+                                 dns_cache.failure_count, MAX_FAILURE_COUNT);
+
+                        // Invalidate DNS cache after too many consecutive failures
+                        if (dns_cache.failure_count >= MAX_FAILURE_COUNT) {
+                            dns_cache.valid = false;
+                            dns_cache.failure_count = 0;
+                            ESP_LOGW(TAG, "Invalidated DNS cache due to %d consecutive mDNS failures",
+                                     MAX_FAILURE_COUNT);
+                        }
                     }
                 } else {
-                    // mDNS query failed
-                    dns_cache.failure_count++;
-                    ESP_LOGD(TAG, "mDNS query failure, failure count: %d/%d",
-                             dns_cache.failure_count, MAX_FAILURE_COUNT);
+                    // DNS resolve custom host to IPv4
+                    struct hostent* he = NULL;
+                    if (s_custom_host[0] != '\0') {
+                        he = gethostbyname(s_custom_host);
+                    }
+                    if (he && he->h_addr_list && he->h_addr_list[0]) {
+                        struct in_addr addr;
+                        memcpy(&addr, he->h_addr_list[0], sizeof(addr));
+                        const char* ipstr = inet_ntoa(addr);
+                        if (ipstr) {
+                            snprintf(new_ip, sizeof(new_ip), "%s", ipstr);
+                            if (strcmp(dns_cache.ip_address, new_ip) != 0) {
+                                ip_changed = true;
+                                strncpy(ntp_server_address, new_ip, sizeof(ntp_server_address) - 1);
+                                ntp_server_address[sizeof(ntp_server_address) - 1] = '\0';
 
-                    // Invalidate DNS cache after too many consecutive failures
-                    if (dns_cache.failure_count >= MAX_FAILURE_COUNT) {
-                        dns_cache.valid = false;
-                        dns_cache.failure_count = 0;
-                        ESP_LOGW(TAG, "Invalidated DNS cache due to %d consecutive mDNS failures",
-                                 MAX_FAILURE_COUNT);
+                                strncpy(dns_cache.ip_address, new_ip, sizeof(dns_cache.ip_address) - 1);
+                                dns_cache.ip_address[sizeof(dns_cache.ip_address) - 1] = '\0';
+                                dns_cache.valid = true;
+                                dns_cache.failure_count = 0;
+                                ip_found = true;
+
+                                ESP_LOGI(TAG, "NTP server IP updated and cached (DNS): %s (%s:%u)",
+                                         ntp_server_address, s_custom_host, (unsigned)s_custom_port);
+
+                                // Reset PLL on server change
+                                xSemaphoreTake(pll_mutex, portMAX_DELAY);
+                                pll.valid = false;
+                                pll.sample_count = 0;
+                                probe_count = 0;  // Restart fast probing
+                                xSemaphoreGive(pll_mutex);
+                            } else {
+                                ip_found = true;
+                            }
+                        }
+                    } else {
+                        // DNS resolution failed
+                        dns_cache.failure_count++;
+                        ESP_LOGD(TAG, "DNS resolution failure for '%s', failure count: %d/%d",
+                                 s_custom_host, dns_cache.failure_count, MAX_FAILURE_COUNT);
+
+                        if (dns_cache.failure_count >= MAX_FAILURE_COUNT) {
+                            dns_cache.valid = false;
+                            dns_cache.failure_count = 0;
+                            ESP_LOGW(TAG, "Invalidated DNS cache due to %d consecutive DNS failures",
+                                     MAX_FAILURE_COUNT);
+                        }
                     }
                 }
 
@@ -439,7 +497,8 @@ static void ntp_client_task(void *pvParameters) {
 
         // Update SNTP server if IP was found and either changed or SNTP not initialized yet
         if (ip_found && (ip_changed || !sntp_initialized)) {
-            update_sntp_server(ntp_server_address);
+            const char* sntp_target = s_use_mdns ? ntp_server_address : s_custom_host;
+            update_sntp_server(sntp_target);
         }
 
         // Update last known time for variance tracking (only if SNTP is initialized)
@@ -454,7 +513,8 @@ static void ntp_client_task(void *pvParameters) {
             if ((now - last_probe_time) >= pdMS_TO_TICKS(probe_interval_ms)) {
                 // Perform micro-probe burst
                 ntp_sample_t sample;
-                if (ntp_micro_probe_burst(ntp_server_address, &sample)) {
+                uint16_t probe_port = s_use_mdns ? 123 : s_custom_port;
+                if (ntp_micro_probe_burst(ntp_server_address, probe_port, &sample)) {
                     pll_update(&sample);
                     probe_count++;
 
@@ -550,6 +610,32 @@ extern "C" bool ntp_get_pll_state(double *offset_us, double *skew_ppm) {
  *
  * @return true if successful, false otherwise
  */
+extern "C" void ntp_client_set_config(bool use_mdns, const char* host, uint16_t port) {
+    s_use_mdns = use_mdns;
+    if (host) {
+        strncpy(s_custom_host, host, sizeof(s_custom_host) - 1);
+        s_custom_host[sizeof(s_custom_host) - 1] = '\0';
+    }
+    s_custom_port = (port == 0) ? 123 : port;
+
+    // Invalidate cache so task will resolve next cycle
+    dns_cache.valid = false;
+    dns_cache.failure_count = 0;
+    memset(dns_cache.ip_address, 0, sizeof(dns_cache.ip_address));
+
+    // Update SNTP target immediately if already initialized
+    if (sntp_initialized) {
+        if (s_use_mdns) {
+            // Will be set on next mDNS discovery
+        } else {
+            update_sntp_server(s_custom_host);
+        }
+    }
+
+    ESP_LOGI(TAG, "NTP config set: use_mdns=%d, host=%s, port=%u",
+             (int)s_use_mdns, s_custom_host[0] ? s_custom_host : "(none)", (unsigned)s_custom_port);
+}
+
 extern "C" bool ntp_trigger_probe() {
     if (!dns_cache.valid) {
         ESP_LOGW(TAG, "Cannot trigger probe: no NTP server IP cached");
@@ -557,7 +643,8 @@ extern "C" bool ntp_trigger_probe() {
     }
 
     ntp_sample_t sample;
-    if (ntp_micro_probe_burst(dns_cache.ip_address, &sample)) {
+    uint16_t probe_port = s_use_mdns ? 123 : s_custom_port;
+    if (ntp_micro_probe_burst(dns_cache.ip_address, probe_port, &sample)) {
         pll_update(&sample);
         return true;
     }

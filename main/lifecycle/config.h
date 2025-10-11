@@ -42,6 +42,10 @@ bool lifecycle_get_enable_mdns_discovery(void);
 uint32_t lifecycle_get_discovery_interval_ms(void);
 bool lifecycle_get_auto_select_best_device(void);
 
+// NTP configuration getters
+bool lifecycle_get_ntp_screamrouter_mode(void);
+const char* lifecycle_get_ntp_server_host(void);
+uint16_t lifecycle_get_ntp_server_port(void);
 // Configuration setter functions
 esp_err_t lifecycle_set_port(uint16_t port);
 esp_err_t lifecycle_set_hostname(const char* hostname);
@@ -67,6 +71,11 @@ esp_err_t lifecycle_set_network_inactivity_timeout_ms(uint32_t timeout_ms);
 esp_err_t lifecycle_set_enable_mdns_discovery(bool enable);
 esp_err_t lifecycle_set_discovery_interval_ms(uint32_t interval_ms);
 esp_err_t lifecycle_set_auto_select_best_device(bool enable);
+
+// NTP configuration setters
+esp_err_t lifecycle_set_ntp_screamrouter_mode(bool enable);
+esp_err_t lifecycle_set_ntp_server_host(const char* host);
+esp_err_t lifecycle_set_ntp_server_port(uint16_t port);
 
 // Batch update structure for atomic multi-parameter updates
 typedef struct lifecycle_config_update {
@@ -144,6 +153,16 @@ typedef struct lifecycle_config_update {
     
     bool update_auto_select_best_device;
     bool auto_select_best_device;
+
+    // NTP configuration (runtime-configurable)
+    bool update_ntp_screamrouter_mode;
+    bool ntp_screamrouter_mode;
+
+    bool update_ntp_server_host;
+    const char* ntp_server_host;
+
+    bool update_ntp_server_port;
+    uint16_t ntp_server_port;
     
     bool update_setup_wizard_completed;
     bool setup_wizard_completed;
