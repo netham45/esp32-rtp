@@ -8,7 +8,7 @@
 #include "freertos/semphr.h"
 #include "esp_log.h"
 
-#define LOG_BUFFER_SIZE_DEFAULT (1024 * 512) // 512KB
+#define LOG_BUFFER_SIZE_DEFAULT (1024 * 4) // 4KB
 #define LOG_LINE_MAX_LENGTH 256
 
 typedef struct {

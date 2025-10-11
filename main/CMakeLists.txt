@@ -1,3 +1,16 @@
+# Auto-increment version before build
+# Change 'build' to 'patch' if you want to increment patch instead
+execute_process(
+    COMMAND ${PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/increment_version.py
+            ${CMAKE_CURRENT_SOURCE_DIR}/version.h build
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    RESULT_VARIABLE VERSION_INCREMENT_RESULT
+)
+
+if(NOT VERSION_INCREMENT_RESULT EQUAL 0)
+    message(WARNING "Failed to increment version")
+endif()
+
 # Set up web files for embedding into the firmware
 set(WEB_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/web")
 set(WEB_FILES
@@ -50,6 +63,7 @@ set (RECEIVER_SRCS
     "receiver/buffer.c"
     "receiver/network_in.c"
     "receiver/sap_listener.c"
+    "receiver/rtcp_receiver.c"
 )
 
 idf_component_register(SRCS "esp32-rtp.c"

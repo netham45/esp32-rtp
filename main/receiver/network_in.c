@@ -8,6 +8,9 @@
 #include "audio_out.h"
 #include "spdif_out.h"
 #include "lifecycle_manager.h"
+#ifdef CONFIG_RTCP_ENABLED
+#include "rtcp_receiver.h"
+#endif
 #include "esp_netif.h"
 #include "esp_system.h"
 #include "esp_wifi.h"
@@ -22,9 +25,38 @@
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "buffer.h"
+#include "esp_timer.h"
 #include "config/config_manager.h"
 #include "pcm_visualizer.h"  // For pcm_viz_write
 
+// Low-rate summary interval default if not provided by Kconfig
+#ifndef CONFIG_RTP_RX_LOG_SUMMARY_INTERVAL_MS
+#define CONFIG_RTP_RX_LOG_SUMMARY_INTERVAL_MS 5000
+#endif
+/*
+ * Runtime audio bytes-per-ms helper.
+ * 192 bytes/ms is only true for 48kHz, 16-bit, 2-channel audio (48000 * 2 * 2 / 1000 = 192).
+ * Using this helper avoids reintroducing that magic number and adapts to runtime configuration.
+ */
+static inline uint32_t rtp_bytes_per_ms(void) {
+    uint32_t sample_rate = lifecycle_get_sample_rate();
+    uint32_t bit_depth   = lifecycle_get_bit_depth();
+
+    // TODO: If a runtime channels accessor becomes available, use it; default to stereo for now.
+    uint32_t channels = 2;
+
+    if (sample_rate == 0 || bit_depth == 0 || channels == 0) {
+        return 0;
+    }
+    if ((bit_depth % 8u) != 0u) {
+        // Non-byte-aligned bit depths not supported by this helper; avoid fractional bytes/sample.
+        return 0;
+    }
+
+    uint32_t bytes_per_sample = bit_depth / 8u;
+    uint64_t numerator = (uint64_t)sample_rate * (uint64_t)channels * (uint64_t)bytes_per_sample;
+    return (uint32_t)(numerator / 1000u);
+}
 // RTP header structure (12 bytes) - matches sender format
 typedef struct __attribute__((packed)) {
     uint8_t  vpxcc;      // Version(2), Padding(1), Extension(1), CSRC count(4)
@@ -51,12 +83,20 @@ typedef struct __attribute__((packed)) {
 // Socket and task handles
 static int unicast_sock = -1;  // Socket for configured port (always active)
 static int multicast_sock = -1;  // Socket for multicast groups (when in multicast mode)
+#ifdef CONFIG_RTCP_ENABLED
+static int rtcp_sock = -1;  // Socket for RTCP packets (port + 1)
+#endif
 static TaskHandle_t udp_handler_task = NULL;
 
 // RTP statistics
 static uint32_t packets_received = 0;
 static uint32_t packets_lost = 0;
+// Kept for legacy stats accessor; no longer updated in RTCP path
+static uint32_t packets_dropped_late = 0;
 
+// Track enqueue path usage (RTCP mapped vs legacy fallback)
+static uint32_t mapped_enqueue_count = 0;
+static uint32_t legacy_enqueue_count = 0;
 // Multicast configuration
 typedef struct {
     bool enabled;
@@ -110,6 +150,38 @@ static void create_udp_server(void) {
     }
 
     ESP_LOGI(TAG, "UDP server listening on port %d (unicast socket)", port);
+    
+#ifdef CONFIG_RTCP_ENABLED
+    // Create RTCP socket on port + 1
+    rtcp_sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
+    if (rtcp_sock < 0) {
+        ESP_LOGE(TAG, "Unable to create RTCP socket: errno %d", errno);
+        return;
+    }
+    
+    // Set socket options
+    setsockopt(rtcp_sock, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+    
+    // Set non-blocking
+    flags = fcntl(rtcp_sock, F_GETFL, 0);
+    fcntl(rtcp_sock, F_SETFL, flags | O_NONBLOCK);
+    
+    // Bind to RTCP port (RTP port + 1)
+    memset(&dest_addr, 0, sizeof(dest_addr));
+    dest_addr.sin_family = AF_INET;
+    dest_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    dest_addr.sin_port = htons(port + 1);
+    
+    err = bind(rtcp_sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+    if (err < 0) {
+        ESP_LOGE(TAG, "RTCP socket unable to bind to port %d: errno %d", port + 1, errno);
+        close(rtcp_sock);
+        rtcp_sock = -1;
+        return;
+    }
+    
+    ESP_LOGI(TAG, "RTCP server listening on port %d", port + 1);
+#endif
 }
 
 static void close_udp_server(void) {
@@ -117,6 +189,12 @@ static void close_udp_server(void) {
         close(unicast_sock);
         unicast_sock = -1;
     }
+#ifdef CONFIG_RTCP_ENABLED
+    if (rtcp_sock >= 0) {
+        close(rtcp_sock);
+        rtcp_sock = -1;
+    }
+#endif
 }
 
 static void close_multicast_socket(void) {
@@ -124,6 +202,53 @@ static void close_multicast_socket(void) {
         close(multicast_sock);
         multicast_sock = -1;
     }
+}
+// Low-rate RTP structured summary; prints once per CONFIG_RTP_RX_LOG_SUMMARY_INTERVAL_MS
+static void rtp_log_summary_if_due(void) {
+#ifndef CONFIG_RTCP_LOG_RX_STATS
+    return;
+#else
+    static uint64_t last_sum_us = 0;
+    const uint64_t interval_us = ((uint64_t)CONFIG_RTP_RX_LOG_SUMMARY_INTERVAL_MS) * 1000ULL;
+    uint64_t now = esp_timer_get_time();
+    if (last_sum_us != 0 && (now - last_sum_us) < interval_us) {
+        return;
+    }
+    last_sum_us = now;
+
+    const char *mode_str = multicast_config.enabled ? "Multicast" : "Unicast";
+    uint32_t jitter_us = 0;
+    int32_t cumlost = 0;
+    uint32_t primary = 0;
+    bool have_primary = false;
+
+#ifdef CONFIG_RTCP_ENABLED
+    double jitter_ts = 0.0;
+    if (rtcp_get_primary_ssrc(&primary)) {
+        have_primary = rtcp_get_rx_stats(primary, NULL, &cumlost, &jitter_ts);
+        if (have_primary && jitter_ts > 0.0) {
+            // Convert RTP tick jitter to microseconds using nominal a0
+            double j_us = jitter_ts * (1000000.0 / (double)CONFIG_SAMPLE_RATE);
+            if (j_us < 0.0) j_us = 0.0;
+            if (j_us > (double)UINT32_MAX) j_us = (double)UINT32_MAX;
+            jitter_us = (uint32_t)(j_us + 0.5);
+        }
+    }
+#endif
+
+    ESP_LOGI(TAG,
+             "RTP sum: rx=%u lost=%u drop=%u mode=%s filter=%d mapped=%u legacy=%u jitter_us=%u cumlost=%d ssrc=0x%08X",
+             packets_received,
+             packets_lost,
+             packets_dropped_late,
+             mode_str,
+             multicast_config.filter_by_ssrc ? 1 : 0,
+             mapped_enqueue_count,
+             legacy_enqueue_count,
+             jitter_us,
+             (int)cumlost,
+             have_primary ? primary : 0u);
+#endif
 }
 
 // SAP handler moved to sap_listener.c
@@ -137,6 +262,9 @@ static void udp_handler(void *pvParameters) {
     struct timeval tv;
 
     while (1) {
+        // Periodic RTP summary (low rate)
+        rtp_log_summary_if_due();
+
         // Setup select with both sockets
         FD_ZERO(&read_fds);
         int max_fd = -1;
@@ -152,6 +280,15 @@ static void udp_handler(void *pvParameters) {
                 max_fd = multicast_sock;
             }
         }
+        
+#ifdef CONFIG_RTCP_ENABLED
+        if (rtcp_sock >= 0) {
+            FD_SET(rtcp_sock, &read_fds);
+            if (rtcp_sock > max_fd) {
+                max_fd = rtcp_sock;
+            }
+        }
+#endif
         
         // If no sockets are active, wait and retry
         if (max_fd < 0) {
@@ -176,11 +313,19 @@ static void udp_handler(void *pvParameters) {
 
         // Check which socket has data and read from it
         int active_sock = -1;
+        bool is_rtcp = false;
+        
         if (unicast_sock >= 0 && FD_ISSET(unicast_sock, &read_fds)) {
             active_sock = unicast_sock;
         } else if (multicast_sock >= 0 && FD_ISSET(multicast_sock, &read_fds)) {
             active_sock = multicast_sock;
         }
+#ifdef CONFIG_RTCP_ENABLED
+        else if (rtcp_sock >= 0 && FD_ISSET(rtcp_sock, &read_fds)) {
+            active_sock = rtcp_sock;
+            is_rtcp = true;
+        }
+#endif
         
         if (active_sock < 0) {
             continue;  // No data available
@@ -197,6 +342,20 @@ static void udp_handler(void *pvParameters) {
             ESP_LOGE(TAG, "recvfrom failed: errno %d", errno);
             break;
         }
+
+#ifdef CONFIG_RTCP_ENABLED
+        // Check if this is an RTCP packet
+        if (is_rtcp) {
+            ESP_LOGD(TAG, "Received RTCP packet: %d bytes from %s:%d",
+                    len, inet_ntoa(source_addr.sin_addr), ntohs(source_addr.sin_port));
+            
+            // Parse RTCP packet
+            if (rtcp_parse_packet((uint8_t *)rx_buffer, len) == ESP_OK) {
+                ESP_LOGD(TAG, "RTCP packet parsed successfully");
+            }
+            continue;  // RTCP packets don't contain audio data
+        }
+#endif
 
         if (len < sizeof(rtp_header_t)) {
             ESP_LOGW(TAG, "Packet too small for RTP header: %d bytes", len);
@@ -265,11 +424,35 @@ static void udp_handler(void *pvParameters) {
             }
         }
 
-        // Track sequence numbers for packet loss detection
+        // Track sequence numbers and update RTCP RX stats
+#ifdef CONFIG_RTCP_ENABLED
+        // Capture arrival time as soon as possible and convert to RTP tick units
+        uint64_t arrival_mono_us = esp_timer_get_time();
+        uint32_t arrival_rtp_ticks = (uint32_t)((arrival_mono_us * (uint64_t)CONFIG_SAMPLE_RATE) / 1000000ULL);
+#endif
         static uint16_t last_seq = 0;
         static bool first_packet = true;
         uint16_t seq = ntohs(rtp->seq_num);
-        
+#ifdef CONFIG_RTCP_ENABLED
+        // Update RTCP-backed receiver stats (extended seq, loss, jitter)
+        uint32_t ssrc = ntohl(rtp->ssrc);
+        uint32_t rtp_ts = ntohl(rtp->timestamp);
+        rtcp_update_rx_stats(ssrc, seq, rtp_ts, arrival_rtp_ticks);
+
+        // Primary SSRC hygiene (decimated): consider switching when not filtering by SSRC
+        static uint32_t primary_decimator = 0;
+        if (!multicast_config.filter_by_ssrc) {
+            if ((++primary_decimator & 0xFFu) == 0) {
+                uint32_t new_primary = 0;
+                if (rtcp_consider_primary_switch(ssrc, &new_primary)) {
+#ifdef CONFIG_RTCP_LOG_SSRC
+                    ESP_LOGI(TAG, "Primary SSRC switched to 0x%08X by RX activity", new_primary);
+#endif
+                }
+            }
+        }
+#else
+        // Legacy local loss tracking (disabled when RTCP is enabled to avoid double counting)
         if (!first_packet) {
             uint16_t expected_seq = (last_seq + 1) & 0xFFFF;
             if (seq != expected_seq) {
@@ -284,7 +467,12 @@ static void udp_handler(void *pvParameters) {
             first_packet = false;
         }
         last_seq = seq;
+#endif
         packets_received++;
+        
+#ifdef CONFIG_RTCP_ENABLED
+        // RTCP RX stats were updated earlier with accurate arrival time
+#endif
 
         // Calculate payload length
         int payload_len = len - header_size;
@@ -337,7 +525,52 @@ static void udp_handler(void *pvParameters) {
             // Feed PCM data to visualizer (after RTP extraction and byte order conversion)
             pcm_viz_write(audio_data, PCM_CHUNK_SIZE);
             
+#ifdef CONFIG_RTCP_ENABLED
+            // Try to use RTCP timing if available
+            uint32_t ssrc = ntohl(rtp->ssrc);
+            uint32_t rtp_timestamp = ntohl(rtp->timestamp);
+            uint64_t playout_time = 0;
+            
+            if (rtcp_calculate_playout_time(ssrc, rtp_timestamp, &playout_time) == ESP_OK) {
+                // Compute PLL observation: want one packet duration ahead of DAC at enqueue time
+                uint64_t now_us = esp_timer_get_time();
+                uint32_t sample_rate = lifecycle_get_sample_rate();
+                uint32_t bit_depth   = lifecycle_get_bit_depth();
+                uint32_t channels    = 2; // default stereo unless accessor exists
+                uint32_t bytes_per_sample = (bit_depth / 8u);
+                uint64_t bytes_per_sec = (uint64_t)sample_rate * (uint64_t)channels * (uint64_t)bytes_per_sample;
+                if (bytes_per_sec > 0ULL) {
+                    uint64_t packet_dur_us = ((uint64_t)PCM_CHUNK_SIZE * 1000000ULL) / bytes_per_sec;
+                    int64_t error_us = ((int64_t)playout_time - (int64_t)now_us) - (int64_t)packet_dur_us;
+                    rtcp_pll_observe(ssrc, error_us, (uint32_t)packet_dur_us);
+                }
+ 
+                // Enqueue with mapped playout time; no per-packet trimming or forced reschedule
+                push_chunk_with_timestamp(audio_data, playout_time);
+                mapped_enqueue_count++;
+ 
+                static uint32_t rtcp_sync_counter = 0;
+                if (++rtcp_sync_counter % 1000 == 0) {
+                    int64_t delta_us = (int64_t)playout_time - (int64_t)esp_timer_get_time();
+                    ESP_LOGI(TAG, "RTCP sync: enqueued packet with playout in %lld ms", (long long)(delta_us / 1000));
+                }
+            } else {
+                // No RTCP timing available, use legacy timing
+                push_chunk(audio_data);
+                legacy_enqueue_count++;
+ 
+                static uint32_t no_sync_counter = 0;
+                static uint32_t last_logged_ssrc = 0;
+                if (ssrc != last_logged_ssrc || ++no_sync_counter % 1000 == 0) {
+                    ESP_LOGD(TAG, "No RTCP sync for SSRC 0x%08X, using legacy timing", ssrc);
+                    last_logged_ssrc = ssrc;
+                }
+            }
+#else
+            // RTCP disabled, use legacy timing
             push_chunk(audio_data);
+            legacy_enqueue_count++;
+#endif
         } else {
             // For non-standard sizes, we'd need to buffer and repackage
             // Log this case so we know if it happens
@@ -355,10 +588,9 @@ static void udp_handler(void *pvParameters) {
             if (total > 0) {
                 loss_rate = (float)packets_lost / (float)total * 100.0f;
             }
-            ESP_LOGI(TAG, "RTP RX Stats: Received=%u, Lost=%u, Loss=%.2f%%, Mode=%s, vpxcc=0x%02X (V=%d), PT=%d",
+            ESP_LOGI(TAG, "RTP RX Stats: Received=%u, Lost=%u (%.2f%%), Mode=%s",
                     packets_received, packets_lost, loss_rate,
-                    multicast_config.enabled ? "Multicast" : "Unicast",
-                    rtp->vpxcc, RTP_VERSION(rtp->vpxcc), RTP_PT(rtp->mpt));
+                    multicast_config.enabled ? "Multicast" : "Unicast");
             stats_counter = 0;
         }
     }
@@ -369,9 +601,16 @@ static void udp_handler(void *pvParameters) {
 esp_err_t network_init(void) {
     ESP_LOGI(TAG, "Starting network receiver (RTP mode)");
     
+#ifdef CONFIG_RTCP_ENABLED
+    // Initialize RTCP receiver
+    if (rtcp_init() != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize RTCP receiver");
+    }
+#endif
+    
     create_udp_server();
 
-    xTaskCreatePinnedToCore(udp_handler, "udp_handler", 8192, NULL,
+    xTaskCreatePinnedToCore(udp_handler, "udp_handler", 12000, NULL,
                            5, &udp_handler_task, 1);
 
     // SAP listener functionality moved to sap_listener module
@@ -661,6 +900,19 @@ void get_rtp_statistics(uint32_t *received, uint32_t *lost, float *loss_rate) {
     }
 }
 
+void get_rtp_drop_statistics(uint32_t *dropped, float *drop_rate) {
+    if (dropped) {
+        *dropped = packets_dropped_late;
+    }
+    if (drop_rate) {
+        if (packets_received > 0) {
+            *drop_rate = (float)packets_dropped_late / (float)packets_received * 100.0f;
+        } else {
+            *drop_rate = 0.0f;
+        }
+    }
+}
+
 esp_err_t network_deinit(void) {
     ESP_LOGI(TAG, "Stopping network receiver");
     
@@ -671,6 +923,10 @@ esp_err_t network_deinit(void) {
     
     close_udp_server();
     close_multicast_socket();
+    
+#ifdef CONFIG_RTCP_ENABLED
+    rtcp_deinit();
+#endif
     
     ESP_LOGI(TAG, "Network receiver stopped");
     return ESP_OK;

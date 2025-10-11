@@ -16,8 +16,9 @@
 // Sample rate for incoming PCM (from Kconfig)
 #define SAMPLE_RATE CONFIG_SAMPLE_RATE
 // Bit depth for incoming PCM (from Kconfig)
-#define BIT_DEPTH CONFIG_BIT_DEPTH
+#define BIT_DEPTH 48000
 // Volume 0.0f-1.0f (from Kconfig percent)
+#define CONFIG_DEFAULT_VOLUME_PCT 100
 #define VOLUME (CONFIG_DEFAULT_VOLUME_PCT / 100.0f)
 
 // Time to wake from deep sleep to check for DAC (in ms)

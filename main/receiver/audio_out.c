@@ -9,7 +9,13 @@
 #include "config/config_manager.h"
 #include "spdif_out.h"
 #include "usb_out.h"
+#include "sdkconfig.h"
+#include "esp_timer.h"
 
+// Low-rate summary interval default if not provided by Kconfig (declared in rtcp_receiver.c as well)
+#ifndef CONFIG_AUDIO_OUT_LOG_SUMMARY_INTERVAL_MS
+#define CONFIG_AUDIO_OUT_LOG_SUMMARY_INTERVAL_MS 10000
+#endif
 // USB out component now manages its own device handle internally
 // We don't need to store the handle here anymore
 
@@ -21,6 +27,35 @@ bool is_silent = false;
 uint32_t silence_duration_ms = 0;
 TickType_t last_audio_time = 0;
 
+// Low-rate Audio structured summary; prints once per CONFIG_AUDIO_OUT_LOG_SUMMARY_INTERVAL_MS
+static void audio_log_summary_if_due(void) {
+    static uint64_t last_sum_us = 0;
+    const uint64_t interval_us = ((uint64_t)CONFIG_AUDIO_OUT_LOG_SUMMARY_INTERVAL_MS) * 1000ULL;
+    uint64_t now_us = esp_timer_get_time();
+    if (last_sum_us != 0 && (now_us - last_sum_us) < interval_us) {
+        return;
+    }
+    last_sum_us = now_us;
+
+    // Compute time since last_audio_time in ms with tick rollover handling
+    TickType_t current_tick = xTaskGetTickCount();
+    uint32_t last_ms = 0;
+    if (current_tick < last_audio_time) {
+        last_ms = ((portMAX_DELAY - last_audio_time) + current_tick) * portTICK_PERIOD_MS;
+    } else {
+        last_ms = (current_tick - last_audio_time) * portTICK_PERIOD_MS;
+    }
+
+    device_mode_t mode = lifecycle_get_device_mode();
+    const char *mode_str = (mode == MODE_RECEIVER_USB) ? "USB" :
+                           (mode == MODE_RECEIVER_SPDIF) ? "SPDIF" : "UNKNOWN";
+
+    // Only report silence ms when actually silent to match intent; otherwise 0
+    uint32_t silent_ms = is_silent ? silence_duration_ms : 0;
+
+    ESP_LOGI(TAG, "Audio sum: playing=%d mode=%s last_ms=%u silent_ms=%u",
+             playing ? 1 : 0, mode_str, last_ms, silent_ms);
+}
 // Configuration change handler for audio output
 esp_err_t audio_out_update_volume(void) {
     device_mode_t mode = lifecycle_get_device_mode();
@@ -139,28 +174,71 @@ void pcm_handler(void* pvParams) {
     ESP_LOGI(TAG, "PCM handler started for mode: %d", mode);
     
     while (true) {
+        // Periodic Audio summary (low rate)
+        audio_log_summary_if_due();
+
         if (playing) {
-            uint8_t *data = pop_chunk();
+            packet_with_ts_t *packet = pop_chunk();
             TickType_t current_time = xTaskGetTickCount();
             
-            if (data) {
+            if (packet) {
                 if (is_silent) {
                     is_silent = false;
                 }
                 silence_duration_ms = 0;
                 last_audio_time = xTaskGetTickCount(); // Reset to current time
                 
+                // Validate skip_bytes doesn't exceed chunk size
+                if (packet->skip_bytes >= PCM_CHUNK_SIZE) {
+                    ESP_LOGE(TAG, "Invalid skip_bytes %u >= chunk size %d, dropping packet",
+                            packet->skip_bytes, PCM_CHUNK_SIZE);
+                    continue;
+                }
+                
+                // Get audio start position and length based on skip_bytes
+                uint8_t *audio_start = packet->packet_buffer + packet->skip_bytes;
+                int audio_len = PCM_CHUNK_SIZE - packet->skip_bytes;
+                
+                if (packet->skip_bytes > 0) {
+                    // Log every skip event with details
+                    ESP_LOGI(TAG, "Audio trim: skipping %u bytes, playing %d bytes (%.2f ms trimmed)",
+                            packet->skip_bytes, audio_len,
+                            (float)packet->skip_bytes / 192.0f);  // 192 bytes/ms at 48kHz stereo 16-bit
+                    
+                    // Periodic summary
+                    static uint32_t total_skipped_bytes = 0;
+                    static uint32_t skip_count = 0;
+                    total_skipped_bytes += packet->skip_bytes;
+                    skip_count++;
+                    
+                    if (skip_count % 100 == 0) {
+                        ESP_LOGI(TAG, "Trim summary: %u packets trimmed, avg %u bytes/packet (%.2f ms/packet)",
+                                skip_count, total_skipped_bytes / skip_count,
+                                (float)(total_skipped_bytes / skip_count) / 192.0f);
+                    }
+                }
+                
                 // Process the audio data based on current mode
                 if (mode == MODE_RECEIVER_USB) {
                     if (usb_out_is_connected()) {
-                        usb_out_write(data, PCM_CHUNK_SIZE, portMAX_DELAY);
+                        // USB output - handle partial chunks properly
+                        if (audio_len > 0) {
+                            usb_out_write(audio_start, audio_len, portMAX_DELAY);
+                        } else {
+                            ESP_LOGW(TAG, "No audio data to write after skipping %u bytes", packet->skip_bytes);
+                        }
                     } else {
                         // DAC is not connected but we're trying to play - should enter sleep
                         ESP_LOGW(TAG, "PCM handler tried to write with no USB DAC");
                         playing = false; // Force playback to stop
                     }
                 } else if (mode == MODE_RECEIVER_SPDIF) {
-                    spdif_write(data, PCM_CHUNK_SIZE);
+                    // SPDIF output - handle partial chunks properly
+                    if (audio_len > 0) {
+                        spdif_write(audio_start, audio_len);
+                    } else {
+                        ESP_LOGW(TAG, "No audio data to write after skipping %u bytes", packet->skip_bytes);
+                    }
                 } else {
                     ESP_LOGW(TAG, "PCM handler running in unsupported mode: %d", mode);
                 }

@@ -1,20 +1,11 @@
 menu "ESP32-RTP Configuration"
 
 menu "Core Audio"
-config PCM_CHUNK_SIZE
-    int "PCM chunk size (bytes)"
-    default 1152
 config SAMPLE_RATE
     int "Default sample rate (Hz)"
     default 48000
-config BIT_DEPTH
-    int "Default bit depth"
-    range 8 32
-    default 16
-config DEFAULT_VOLUME_PCT
-    int "Default volume percent (0-100)"
-    range 0 100
-    default 100
+    help
+        Sample rate used for audio processing and RTP timestamp calculations.
 endmenu
 
 menu "Networking (RTP/SAP)"
@@ -22,28 +13,20 @@ config RTP_PORT
     int "RTP UDP port"
     range 1024 65535
     default 4010
+    help
+        UDP port for receiving RTP audio streams.
+        
 config SAP_PORT
     int "SAP port"
     default 9875
+    help
+        Port for SAP (Session Announcement Protocol) announcements.
+        
 config SAP_MULTICAST_ADDR
     string "SAP multicast IPv4 address"
     default "224.2.127.254"
-config SAP_PULSEAUDIO_ADDR
-    string "PulseAudio SAP IPv4 address"
-    default "224.0.0.56"
-# Optional SAP tunables
-config SAP_MAX_ANNOUNCEMENTS
-    int "SAP max announcements to keep"
-    default 10
-config SAP_ANNOUNCEMENT_TIMEOUT_SEC
-    int "SAP announcement timeout (seconds)"
-    default 120
-config SAP_CLEANUP_INTERVAL_SEC
-    int "SAP cleanup interval (seconds)"
-    default 30
-config SAP_BUFFER_SIZE
-    int "SAP receive buffer size (bytes)"
-    default 1024
+    help
+        Multicast address for SAP announcements.
 endmenu
 
 menu "RTCP Configuration"
@@ -54,59 +37,6 @@ config RTCP_ENABLED
         Enable RTCP (RTP Control Protocol) for media synchronization.
         RTCP provides timing information from RTP senders and statistics
         about the quality of reception.
-
-choice SYNC_MODE
-    prompt "Synchronization Mode"
-    default SYNC_MODE_ADAPTIVE
-    depends on RTCP_ENABLED
-    help
-        Select the synchronization mode for audio playout when RTCP timing is available.
-        
-    config SYNC_MODE_LEGACY
-        bool "Legacy (packet count based)"
-        help
-            Traditional packet count based buffering.
-            Ignores RTCP timing information even if available.
-            
-    config SYNC_MODE_STRICT
-        bool "Strict (drop late packets)"
-        help
-            Strict timing mode that drops packets arriving too late.
-            Provides best synchronization but may cause audio gaps.
-            
-    config SYNC_MODE_ADAPTIVE
-        bool "Adaptive (play late packets)"
-        help
-            Adaptive mode that plays late packets with a warning.
-            Balances synchronization with audio continuity.
-endchoice
-
-config MIN_FUTURE_BUFFER_MS
-    int "Minimum future buffer (ms)"
-    default 50
-    range 10 500
-    depends on RTCP_ENABLED && !SYNC_MODE_LEGACY
-    help
-        Minimum amount of future audio to maintain in buffer.
-        Ensures smooth playout by buffering ahead.
-
-config MAX_PLAYOUT_DELAY_MS
-    int "Maximum acceptable playout delay (ms)"
-    default 100
-    range 50 1000
-    depends on RTCP_ENABLED && !SYNC_MODE_LEGACY
-    help
-        Maximum delay before considering a packet too late.
-        Packets delayed beyond this are logged or dropped.
-
-config RTCP_RR_INTERVAL_MS
-    int "RTCP Receiver Report interval (ms)"
-    default 5000
-    range 1000 30000
-    depends on RTCP_ENABLED
-    help
-        How often to send RTCP Receiver Reports back to the sender.
-        RFC 3550 recommends 5 seconds as a reasonable default.
 
 config RTCP_TARGET_LATENCY_MS
     int "Target playout latency (ms)"
@@ -136,42 +66,5 @@ config RTCP_SEND_RR
         These reports contain reception statistics that help
         the sender adapt to network conditions.
 endmenu
-
-
-menu "Features"
-config FEATURE_USB
-    bool "Enable USB audio output"
-    default y
-config FEATURE_SPDIF
-    bool "Enable SPDIF sender/receiver"
-    default y
-endmenu
-
-menu "mDNS Discovery"
-config MDNS_QUERY_TIMEOUT_MS
-    int "mDNS query timeout (ms)"
-    default 3000
-config MDNS_MAX_RESULTS
-    int "mDNS max results per query"
-    default 10
-config MDNS_MAX_DEVICES
-    int "Max discovered devices tracked"
-    default 16
-endmenu
-
-
-menu "WiFi"
-config WIFI_AP_CHANNEL
-    int "WiFi AP channel"
-    range 1 13
-    default 1
-config WIFI_AP_MAX_CONNECTIONS
-    int "WiFi AP max connections"
-    default 4
-config WIFI_CONNECTION_TIMEOUT_MS
-    int "WiFi connection timeout (ms)"
-    default 10000
-endmenu
-
 
 endmenu

@@ -11,6 +11,7 @@ esp_err_t restart_network(void);
 esp_err_t network_update_port(void);
 esp_err_t network_deinit(void);
 void get_rtp_statistics(uint32_t *received, uint32_t *lost, float *loss_rate);
+void get_rtp_drop_statistics(uint32_t *dropped, float *drop_rate);
 
 // Multicast functions
 esp_err_t network_join_multicast(const char* multicast_ip, uint16_t port, uint32_t ssrc);
