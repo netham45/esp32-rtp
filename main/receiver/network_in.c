@@ -88,6 +88,13 @@ static int rtcp_sock = -1;  // Socket for RTCP packets (port + 1)
 #endif
 static TaskHandle_t udp_handler_task = NULL;
 
+// Accumulator to repackage arbitrary RTP payload sizes into PCM_CHUNK_SIZE chunks
+// Avoids dropping "non-standard" payload sizes by buffering and emitting exact 1152-byte blocks.
+static uint8_t  agg_buf[PCM_CHUNK_SIZE];
+static uint16_t agg_len = 0;              // Current fill length in bytes
+static uint32_t agg_rtp_start_ts = 0;     // RTP timestamp corresponding to agg_buf[0]
+static uint32_t agg_last_ssrc = 0;        // Guard to avoid mixing sources across accumulator
+
 // RTP statistics
 static uint32_t packets_received = 0;
 static uint32_t packets_lost = 0;
@@ -519,64 +526,96 @@ static void udp_handler(void *pvParameters) {
             samples[i] = ntohs(samples[i]);
         }
         
-        // Only push to audio output if we have the expected chunk size
-        // This maintains compatibility with existing audio pipeline
-        if (payload_len == PCM_CHUNK_SIZE) {
-            // Feed PCM data to visualizer (after RTP extraction and byte order conversion)
-            pcm_viz_write(audio_data, PCM_CHUNK_SIZE);
-            
-#ifdef CONFIG_RTCP_ENABLED
-            // Try to use RTCP timing if available
-            uint32_t ssrc = ntohl(rtp->ssrc);
-            uint32_t rtp_timestamp = ntohl(rtp->timestamp);
-            uint64_t playout_time = 0;
-            
-            if (rtcp_calculate_playout_time(ssrc, rtp_timestamp, &playout_time) == ESP_OK) {
-                // Compute PLL observation: want one packet duration ahead of DAC at enqueue time
-                uint64_t now_us = esp_timer_get_time();
-                uint32_t sample_rate = lifecycle_get_sample_rate();
-                uint32_t bit_depth   = lifecycle_get_bit_depth();
-                uint32_t channels    = 2; // default stereo unless accessor exists
-                uint32_t bytes_per_sample = (bit_depth / 8u);
-                uint64_t bytes_per_sec = (uint64_t)sample_rate * (uint64_t)channels * (uint64_t)bytes_per_sample;
-                if (bytes_per_sec > 0ULL) {
-                    uint64_t packet_dur_us = ((uint64_t)PCM_CHUNK_SIZE * 1000000ULL) / bytes_per_sec;
-                    int64_t error_us = ((int64_t)playout_time - (int64_t)now_us) - (int64_t)packet_dur_us;
-                    rtcp_pll_observe(ssrc, error_us, (uint32_t)packet_dur_us);
-                }
- 
-                // Enqueue with mapped playout time; no per-packet trimming or forced reschedule
-                push_chunk_with_timestamp(audio_data, playout_time);
-                mapped_enqueue_count++;
- 
-                static uint32_t rtcp_sync_counter = 0;
-                if (++rtcp_sync_counter % 1000 == 0) {
-                    int64_t delta_us = (int64_t)playout_time - (int64_t)esp_timer_get_time();
-                    ESP_LOGI(TAG, "RTCP sync: enqueued packet with playout in %lld ms", (long long)(delta_us / 1000));
-                }
-            } else {
-                // No RTCP timing available, use legacy timing
-                push_chunk(audio_data);
-                legacy_enqueue_count++;
- 
-                static uint32_t no_sync_counter = 0;
-                static uint32_t last_logged_ssrc = 0;
-                if (ssrc != last_logged_ssrc || ++no_sync_counter % 1000 == 0) {
-                    ESP_LOGD(TAG, "No RTCP sync for SSRC 0x%08X, using legacy timing", ssrc);
-                    last_logged_ssrc = ssrc;
-                }
+        // Unified accumulator-based enqueue to handle arbitrary payload splits and emit 1152-byte chunks
+        {
+            // Compute alignment by audio frame (channels=2, bytes_per_sample from runtime bit depth)
+            uint32_t bit_depth = lifecycle_get_bit_depth();
+            uint32_t channels = 2; // default stereo unless accessor exists
+            if (bit_depth == 0) {
+                ESP_LOGW(TAG, "Invalid bit depth 0, dropping payload");
+                continue;
             }
+            uint32_t bytes_per_sample = (bit_depth / 8u);
+            if (bytes_per_sample == 0) {
+                ESP_LOGW(TAG, "Unsupported bit depth %u", bit_depth);
+                continue;
+            }
+            uint32_t bpf = bytes_per_sample * channels; // bytes per interleaved frame
+
+            // Require frame alignment; drop malformed payloads
+            if (((uint32_t)payload_len % bpf) != 0u) {
+                ESP_LOGW(TAG, "Payload not aligned to frame size: payload=%d, bpf=%u (dropping)", payload_len, bpf);
+                continue;
+            }
+
+            // Track SSRC changes to avoid mixing different sources in the accumulator
+            uint32_t ssrc2 = ntohl(rtp->ssrc);
+            if (agg_len > 0 && agg_last_ssrc != 0 && ssrc2 != agg_last_ssrc) {
+                ESP_LOGW(TAG, "SSRC changed 0x%08X -> 0x%08X; resetting accumulator (%u bytes discarded)",
+                         agg_last_ssrc, ssrc2, (unsigned)agg_len);
+                agg_len = 0;
+            }
+            agg_last_ssrc = ssrc2;
+
+            uint32_t rtp_ts2 = ntohl(rtp->timestamp);
+
+            int bytes_remaining = payload_len;
+            int packet_offset = 0;
+
+            while (bytes_remaining > 0) {
+                // When starting a new 1152-byte chunk, compute the RTP timestamp for its first frame
+                if (agg_len == 0) {
+                    if (bpf > 0) {
+                        uint32_t frames_offset = (uint32_t)(packet_offset / (int)bpf);
+                        agg_rtp_start_ts = rtp_ts2 + frames_offset;
+                    } else {
+                        agg_rtp_start_ts = rtp_ts2;
+                    }
+                }
+
+                int to_copy = (int)PCM_CHUNK_SIZE - (int)agg_len;
+                if (to_copy > bytes_remaining) {
+                    to_copy = bytes_remaining;
+                }
+
+                memcpy(&agg_buf[agg_len], &audio_data[packet_offset], (size_t)to_copy);
+                agg_len += (uint16_t)to_copy;
+                packet_offset += to_copy;
+                bytes_remaining -= to_copy;
+
+                if (agg_len >= PCM_CHUNK_SIZE) {
+                    // We have one full 1152-byte chunk ready
+                    pcm_viz_write(agg_buf, PCM_CHUNK_SIZE);
+
+#ifdef CONFIG_RTCP_ENABLED
+                    uint64_t playout_time = 0;
+                    if (rtcp_calculate_playout_time(ssrc2, agg_rtp_start_ts, &playout_time) == ESP_OK) {
+                        // PLL observation identical to the exact-size path
+                        uint32_t sample_rate = lifecycle_get_sample_rate();
+                        uint32_t bytes_per_sec = sample_rate * channels * bytes_per_sample;
+                        if (bytes_per_sec > 0u) {
+                            uint64_t packet_dur_us = ((uint64_t)PCM_CHUNK_SIZE * 1000000ULL) / (uint64_t)bytes_per_sec;
+                            int64_t error_us = ((int64_t)playout_time - (int64_t)esp_timer_get_time()) - (int64_t)packet_dur_us;
+                            rtcp_pll_observe(ssrc2, error_us, (uint32_t)packet_dur_us);
+                        }
+                        push_chunk_with_timestamp(agg_buf, playout_time);
+                        mapped_enqueue_count++;
+                        static uint32_t rtcp_sync_counter = 0;
+                        if ((++rtcp_sync_counter % 1000u) == 0u) {
+                            int64_t delta_us = (int64_t)playout_time - (int64_t)esp_timer_get_time();
+                            ESP_LOGI(TAG, "RTCP sync: enqueued packet with playout in %lld ms",
+                                     (long long)(delta_us / 1000));
+                        }
+                    } else {
+                        push_chunk(agg_buf);
+                        legacy_enqueue_count++;
+                    }
 #else
-            // RTCP disabled, use legacy timing
-            push_chunk(audio_data);
-            legacy_enqueue_count++;
+                    push_chunk(agg_buf);
+                    legacy_enqueue_count++;
 #endif
-        } else {
-            // For non-standard sizes, we'd need to buffer and repackage
-            // Log this case so we know if it happens
-            static uint32_t nonstandard_counter = 0;
-            if (++nonstandard_counter <= 10) {
-                ESP_LOGW(TAG, "Skipping non-standard payload size %d (only first 10 warnings shown)", payload_len);
+                    agg_len = 0; // Reset for next chunk (may be completed by current packet remainder)
+                }
             }
         }
         

@@ -14,6 +14,7 @@ const wizard = {
         senderDestination: '',
         senderPort: 4010,
         selectedReceiver: null,
+        spdifDataPin: 17,
         apSettings: {
             ssid: 'ESP32-Scream',
             password: '',
@@ -75,6 +76,10 @@ function updateWizardStep() {
     const stepIndicator = document.getElementById('wizard-step-indicator');
     const footer = document.querySelector('.wizard-footer');
     
+    // Determine total steps dynamically based on selected mode
+    const isSpdifMode = (wizard.data.mode === 'receiver-spdif' || wizard.data.mode === 'sender-spdif');
+    wizard.totalSteps = isSpdifMode ? 6 : 5;
+
     // Update progress
     const progressPercent = (wizard.currentStep / wizard.totalSteps) * 100;
     progressFill.style.width = `${progressPercent}%`;
@@ -89,7 +94,7 @@ function updateWizardStep() {
     nextBtn.textContent = 'Next'; // Reset button text
     footer.style.display = 'flex';
     
-    // Show the current step
+    // Show the current step (conditional mapping for SPDIF flow)
     switch(wizard.currentStep) {
         case 1:
             setupStep1_Mode();
@@ -98,12 +103,27 @@ function updateWizardStep() {
             setupStep2_ModeSpecific();
             break;
         case 3:
-            setupStep3_AP();
+            if (isSpdifMode) {
+                setupStep3_SPDIFPin();
+            } else {
+                setupStep3_AP();
+            }
             break;
         case 4:
-            setupStep4_NetworkConfig();
+            if (isSpdifMode) {
+                setupStep3_AP();
+            } else {
+                setupStep4_NetworkConfig();
+            }
             break;
         case 5:
+            if (isSpdifMode) {
+                setupStep4_NetworkConfig();
+            } else {
+                setupStep5_Review();
+            }
+            break;
+        case 6:
             setupStep5_Review();
             break;
     }
@@ -217,30 +237,39 @@ function setupStep2_ModeSpecific() {
     }
 }
 
+// Step 3: S/PDIF Data Pin
+function setupStep3_SPDIFPin() {
+   document.getElementById('step-3-spdif').style.display = 'block';
+   const pinInput = document.getElementById('spdif-data-pin');
+   if (pinInput) {
+       pinInput.value = (wizard.data.spdifDataPin !== undefined ? wizard.data.spdifDataPin : 17);
+   }
+}
+
 // Step 3: AP Settings
 function setupStep3_AP() {
-    document.getElementById('step-3').style.display = 'block';
-    const skipBtn = document.getElementById('wizard-skip');
-    
-    const isAPOnly = wizard.data.apOnlyMode;
-    
-    // Update UI based on AP mode
-    document.getElementById('ap-optional-text').style.display = isAPOnly ? 'none' : 'inline';
-    document.getElementById('ap-description').textContent = isAPOnly ?
-        'Configure the device\'s WiFi access point that other devices will connect to:' :
-        'Configure the device\'s own WiFi hotspot for initial setup or fallback access:';
-    
-    document.getElementById('ap-only-warning').style.display = isAPOnly ? 'block' : 'none';
-    document.getElementById('ap-info').style.display = isAPOnly ? 'none' : 'block';
-    document.getElementById('ap-hide-option').style.display = isAPOnly ? 'none' : 'block';
-    
-    // Allow skipping AP configuration except in AP-Only mode
-    skipBtn.style.display = isAPOnly ? 'none' : 'block';
-    
-    // Set existing values
-    document.getElementById('ap-ssid').value = wizard.data.apSettings.ssid;
-    document.getElementById('ap-password').value = wizard.data.apSettings.password;
-    document.getElementById('ap-hide-connected').checked = wizard.data.apSettings.hideWhenConnected;
+   document.getElementById('step-3').style.display = 'block';
+   const skipBtn = document.getElementById('wizard-skip');
+   
+   const isAPOnly = wizard.data.apOnlyMode;
+   
+   // Update UI based on AP mode
+   document.getElementById('ap-optional-text').style.display = isAPOnly ? 'none' : 'inline';
+   document.getElementById('ap-description').textContent = isAPOnly ?
+       'Configure the device\'s WiFi access point that other devices will connect to:' :
+       'Configure the device\'s own WiFi hotspot for initial setup or fallback access:';
+   
+   document.getElementById('ap-only-warning').style.display = isAPOnly ? 'block' : 'none';
+   document.getElementById('ap-info').style.display = isAPOnly ? 'none' : 'block';
+   document.getElementById('ap-hide-option').style.display = isAPOnly ? 'none' : 'block';
+   
+   // Allow skipping AP configuration except in AP-Only mode
+   skipBtn.style.display = isAPOnly ? 'none' : 'block';
+   
+   // Set existing values
+   document.getElementById('ap-ssid').value = wizard.data.apSettings.ssid;
+   document.getElementById('ap-password').value = wizard.data.apSettings.password;
+   document.getElementById('ap-hide-connected').checked = wizard.data.apSettings.hideWhenConnected;
 }
 
 // Step 4: Network Configuration
@@ -301,6 +330,12 @@ function setupStep5_Review() {
     
     // Device mode
     summaryHtml += `<li><strong>Device Mode:</strong> ${formatModeName(wizard.data.mode)}</li>`;
+
+    // Show S/PDIF data pin for SPDIF modes
+    if (wizard.data.mode === 'receiver-spdif' || wizard.data.mode === 'sender-spdif') {
+        const pin = (wizard.data.spdifDataPin !== undefined ? wizard.data.spdifDataPin : 17);
+        summaryHtml += `<li><strong>S/PDIF Data Pin:</strong> ${pin}</li>`;
+    }
     
     // Mode-specific item
     if (wizard.data.mode === 'receiver-usb' || wizard.data.mode === 'receiver-spdif') {
@@ -600,6 +635,8 @@ function selectWizardNetwork(ssid) {
 
 // ===== Validation =====
 function validateCurrentStep() {
+    const isSpdifMode = (wizard.data.mode === 'receiver-spdif' || wizard.data.mode === 'sender-spdif');
+
     switch(wizard.currentStep) {
         case 1: // Mode Selection
             if (wizard.data.mode === null || wizard.data.mode === undefined || wizard.data.mode === '') {
@@ -633,49 +670,101 @@ function validateCurrentStep() {
             }
             break;
             
-        case 3: // AP Settings
-            // AP settings - optional, always valid
-            wizard.data.apSettings.ssid = document.getElementById('ap-ssid')?.value || 'ESP32-Scream';
-            wizard.data.apSettings.password = document.getElementById('ap-password')?.value || '';
-            
-            // For AP-Only mode, always keep AP visible
-            if (wizard.data.apOnlyMode) {
-                wizard.data.apSettings.hideWhenConnected = false;
-            } else {
-                wizard.data.apSettings.hideWhenConnected = document.getElementById('ap-hide-connected')?.checked || false;
-            }
-            break;
-            
-        case 4: // Network Configuration
-            // Validate hostname
-            const hostnameInput = document.getElementById('device-hostname')?.value;
-            if (!hostnameInput || hostnameInput.trim() === '') {
-                showWizardError('hostname-error', 'Please enter a device name');
-                return false;
-            }
-            wizard.data.hostname = hostnameInput.trim();
-
-            const networkMode = document.querySelector('input[name="network-mode"]:checked')?.value;
-            wizard.data.apOnlyMode = (networkMode === 'ap-only');
-
-            if (!wizard.data.apOnlyMode) {
-                // WiFi mode - require SSID
-                const ssid = document.getElementById('wifi-ssid')?.value;
-                if (!ssid) {
-                    showWizardError('wifi-error', 'Please enter a network name (SSID)');
+        case 3:
+            if (isSpdifMode) {
+                const pin = parseInt(document.getElementById('spdif-data-pin')?.value);
+                if (isNaN(pin) || pin < 0 || pin > 39) {
+                    showWizardError('spdif-pin-error', 'Please enter a valid GPIO number (0-39)');
                     return false;
                 }
-                wizard.data.ssid = ssid;
-                wizard.data.password = document.getElementById('wifi-password')?.value || '';
+                wizard.data.spdifDataPin = pin;
             } else {
-                // AP-Only mode - clear WiFi credentials
-                wizard.data.ssid = '';
-                wizard.data.password = '';
+                // AP Settings (non-SPDIF flow)
+                wizard.data.apSettings.ssid = document.getElementById('ap-ssid')?.value || 'ESP32-Scream';
+                wizard.data.apSettings.password = document.getElementById('ap-password')?.value || '';
+                
+                // For AP-Only mode, always keep AP visible
+                if (wizard.data.apOnlyMode) {
+                    wizard.data.apSettings.hideWhenConnected = false;
+                } else {
+                    wizard.data.apSettings.hideWhenConnected = document.getElementById('ap-hide-connected')?.checked || false;
+                }
             }
             break;
             
-        case 5: // Review step
-            // No validation needed for review step
+        case 4:
+            if (isSpdifMode) {
+                // AP Settings (SPDIF flow)
+                wizard.data.apSettings.ssid = document.getElementById('ap-ssid')?.value || 'ESP32-Scream';
+                wizard.data.apSettings.password = document.getElementById('ap-password')?.value || '';
+                
+                if (wizard.data.apOnlyMode) {
+                    wizard.data.apSettings.hideWhenConnected = false;
+                } else {
+                    wizard.data.apSettings.hideWhenConnected = document.getElementById('ap-hide-connected')?.checked || false;
+                }
+            } else {
+                // Network Configuration (non-SPDIF flow)
+                const hostnameInput = document.getElementById('device-hostname')?.value;
+                if (!hostnameInput || hostnameInput.trim() === '') {
+                    showWizardError('hostname-error', 'Please enter a device name');
+                    return false;
+                }
+                wizard.data.hostname = hostnameInput.trim();
+
+                const networkMode = document.querySelector('input[name="network-mode"]:checked')?.value;
+                wizard.data.apOnlyMode = (networkMode === 'ap-only');
+
+                if (!wizard.data.apOnlyMode) {
+                    // WiFi mode - require SSID
+                    const ssid = document.getElementById('wifi-ssid')?.value;
+                    if (!ssid) {
+                        showWizardError('wifi-error', 'Please enter a network name (SSID)');
+                        return false;
+                    }
+                    wizard.data.ssid = ssid;
+                    wizard.data.password = document.getElementById('wifi-password')?.value || '';
+                } else {
+                    // AP-Only mode - clear WiFi credentials
+                    wizard.data.ssid = '';
+                    wizard.data.password = '';
+                }
+            }
+            break;
+            
+        case 5:
+            if (isSpdifMode) {
+                // Network Configuration (SPDIF flow)
+                const hostnameInput = document.getElementById('device-hostname')?.value;
+                if (!hostnameInput || hostnameInput.trim() === '') {
+                    showWizardError('hostname-error', 'Please enter a device name');
+                    return false;
+                }
+                wizard.data.hostname = hostnameInput.trim();
+
+                const networkMode = document.querySelector('input[name="network-mode"]:checked')?.value;
+                wizard.data.apOnlyMode = (networkMode === 'ap-only');
+
+                if (!wizard.data.apOnlyMode) {
+                    // WiFi mode - require SSID
+                    const ssid = document.getElementById('wifi-ssid')?.value;
+                    if (!ssid) {
+                        showWizardError('wifi-error', 'Please enter a network name (SSID)');
+                        return false;
+                    }
+                    wizard.data.ssid = ssid;
+                    wizard.data.password = document.getElementById('wifi-password')?.value || '';
+                } else {
+                    // AP-Only mode - clear WiFi credentials
+                    wizard.data.ssid = '';
+                    wizard.data.password = '';
+                }
+            }
+            // Non-SPDIF flow: step 5 is review, no validation
+            break;
+
+        case 6:
+            // SPDIF flow: review step - no validation
             break;
     }
     
@@ -750,9 +839,10 @@ function wizardPrevious() {
 }
 
 function wizardSkip() {
-    // Skip current step (mainly for AP settings in WiFi mode)
-    if (wizard.currentStep === 3) {
-        // Skip AP settings and go to network config
+    // Skip AP settings (step index depends on mode)
+    const isSpdifMode = (wizard.data.mode === 'receiver-spdif' || wizard.data.mode === 'sender-spdif');
+    const apStepNumber = isSpdifMode ? 4 : 3;
+    if (wizard.currentStep === apStepNumber) {
         wizard.currentStep++;
         updateWizardStep();
     }
@@ -797,6 +887,7 @@ function completeWizard() {
         // Device's own AP settings go through /api/settings
         ap_ssid: wizard.data.apSettings.ssid,
         ap_password: wizard.data.apSettings.password,
+        spdif_data_pin: (wizard.data.spdifDataPin !== undefined ? wizard.data.spdifDataPin : 17),
         hide_ap_when_connected: wizard.data.apOnlyMode ? false : wizard.data.apSettings.hideWhenConnected
     };
     
@@ -877,6 +968,7 @@ function fetchDeviceCapabilities() {
             wizard.data.receiverPort = settings.port || 4010;
             wizard.data.senderDestination = settings.sender_destination_ip || '';
             wizard.data.senderPort = settings.sender_destination_port || 4010;
+            wizard.data.spdifDataPin = (typeof settings.spdif_data_pin === 'number') ? settings.spdif_data_pin : 17;
             wizard.data.apSettings.ssid = settings.ap_ssid || 'ESP32-Scream';
             wizard.data.apSettings.password = settings.ap_password || '';
             wizard.data.apSettings.hideWhenConnected = settings.hide_ap_when_connected || false;
