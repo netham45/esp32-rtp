@@ -1,4 +1,6 @@
 # ESP32 RTP Audio Transceiver
+[![Discord](https://img.shields.io/badge/Discord-Join%20Us-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/EXhF6pBhXT)
+
 
 A versatile audio streaming solution for ESP32 that enables high-quality audio transmission over network using RTP protocol. The device can operate in four distinct modes, bridging different audio interfaces (USB/S/PDIF) with network streaming.
 
