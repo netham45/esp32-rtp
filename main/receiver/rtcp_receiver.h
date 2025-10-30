@@ -67,17 +67,21 @@ typedef struct __attribute__((packed)) {
      uint32_t rtp_timestamp;           // Corresponding RTP timestamp
      uint64_t local_time_received;     // Local time when SR was received (esp_timer)
  
-     // Preferred fields for SR anchoring
+     // Preferred fields for SR anchoring (used for deterministic playout mapping)
      uint64_t last_sr_mono_us;         // Monotonic receive time of the most recent SR (esp_timer)
      uint64_t last_sr_ntp_us;          // NTP time (us) carried in the most recent SR
-     uint32_t last_sr_rtp32;           // RTP timestamp from the most recent SR (32-bit)
+     uint32_t last_sr_rtp32;           // RTP timestamp from the most recent SR (32-bit) - SR anchor for NTP-anchored playout mapping
 
      // Linear RTP->time mapping (per-SSRC)
      double   slope_a_us_per_tick;     // nominal microseconds per RTP tick (init to 1e6 / CONFIG_SAMPLE_RATE)
      int64_t  offset_b_mono_us;        // maps sender NTP time to local monotonic: mono = ntp_us + offset_b
      uint64_t rtp_sr_base64;           // unwrapped RTP timestamp at the most recent SR
-     uint64_t mono_sr_base_us;         // local monotonic time when that SR was received
-     uint64_t ntp_sr_base_us;          // sender NTP time (us) carried in that SR
+     uint64_t mono_sr_base_us;         // local monotonic time when that SR was received - SR anchor for playout mapping
+     uint64_t ntp_sr_base_us;          // sender NTP time (us) carried in that SR - SR anchor for NTP-anchored playout mapping
+ 
+     // NTP-anchored playout mapping offsets (computed at each SR)
+     int64_t offset_ntp_to_receiver_us;    // receiver_ntp - sender_ntp (computed at last SR)
+     int64_t wall_to_mono_offset_us;       // mono_now - receiver_ntp (computed at last SR)
  
      // RTP timestamp unwrapping state (per-SSRC)
      uint32_t unwrap_last32;           // last seen RTP 32-bit value

@@ -77,6 +77,22 @@ int64_t ntp_local_to_master(int64_t local_mono_us);
 bool ntp_get_pll_state(double *offset_us, double *skew_ppm);
 
 /**
+ * @brief Get current PLL convergence status
+ *
+ * Returns the current convergence status of the PLL including correction history.
+ * Useful for monitoring convergence and determining when the clock is stable.
+ *
+ * @param corrections_applied Output: total number of corrections applied (can be NULL)
+ * @param total_correction_us Output: total correction amount in microseconds (can be NULL)
+ * @param current_error_us Output: current error in microseconds (can be NULL)
+ * @return true if PLL is valid and converged (error < 500µs), false otherwise
+ *
+ * @note A converged clock typically has error < 500µs. During convergence, multiple
+ *       corrections may be applied, especially for offsets in the 500µs - 100ms range.
+ */
+bool ntp_get_convergence_status(int *corrections_applied, int64_t *total_correction_us, int64_t *current_error_us);
+
+/**
  * @brief Manually trigger an NTP micro-probe burst
  *
  * Immediately performs a burst of NTP queries (8 samples) and updates the PLL

@@ -292,7 +292,7 @@ void setup_audio() {
     
     // Create PCM handler task for all receiver modes
     if (mode == MODE_RECEIVER_USB || mode == MODE_RECEIVER_SPDIF) {
-        xTaskCreatePinnedToCore(pcm_handler, "pcm_handler", 2048, NULL, 5, NULL, 1);
+        xTaskCreatePinnedToCore(pcm_handler, "pcm_handler", 4096, NULL, 5, NULL, 1);
         ESP_LOGI(TAG, "PCM handler task created");
     }
 }

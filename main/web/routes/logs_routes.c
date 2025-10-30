@@ -99,7 +99,7 @@ static esp_err_t logs_get_handler(httpd_req_t *req)
 
     // Use a fixed reasonable buffer size to avoid memory issues
     // Maximum 8KB for log data to be conservative with ESP32 memory
-    size_t max_read_size = 8192;  // 8KB fixed buffer
+    size_t max_read_size = 2048;
     
     // Get current buffer status
     size_t buffer_used = log_buffer_get_used();

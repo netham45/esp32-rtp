@@ -34,6 +34,12 @@
 
 static const char *TAG = "ntp_client";
 
+// Clock correction thresholds
+#define SLEW_THRESHOLD_US      100000LL   // 100ms - below this, use slewing
+#define STEP_THRESHOLD_US    10000000LL   // 10s - above this, use stepping with warning
+#define MIN_CORRECTION_US         500LL   // 500µs - minimum correction to apply
+#define MAX_SLEW_RATE_US        10000LL   // 10ms max correction per iteration
+
 // Task handle for NTP client
 static TaskHandle_t ntp_client_task_handle = NULL;
 static bool ntp_client_initialized = false;
@@ -73,6 +79,9 @@ typedef struct {
     int64_t last_master_us;       // Last master time used for update
     bool valid;         // Whether PLL has been initialized
     int sample_count;   // Number of samples incorporated
+    int64_t total_correction_us;  // Total corrections applied
+    int correction_count;         // Number of corrections
+    int64_t last_error_us;       // Last error magnitude for convergence tracking
 } ntp_pll_t;
 
 static ntp_pll_t pll = {
@@ -81,7 +90,10 @@ static ntp_pll_t pll = {
     .last_update_mono_us = 0,
     .last_master_us = 0,
     .valid = false,
-    .sample_count = 0
+    .sample_count = 0,
+    .total_correction_us = 0,
+    .correction_count = 0,
+    .last_error_us = 0
 };
 
 // Single NTP probe sample
@@ -129,7 +141,15 @@ static bool ntp_query_single(const char *server_ip, ntp_sample_t *sample, uint16
     ntp_packet[0] = 0x23; // LI=0, Version=4, Mode=3 (client)
 
     // Capture T1 (client transmit time)
-    int64_t t1_us = esp_timer_get_time();
+    struct timeval t1_tv;
+    gettimeofday(&t1_tv, NULL);
+    int64_t t1_us = (int64_t)t1_tv.tv_sec * 1000000LL + (int64_t)t1_tv.tv_usec;
+    
+    // If system time is not initialized yet (year < 2020), use monotonic time
+    bool use_monotonic = (t1_tv.tv_sec < 1577836800); // Jan 1, 2020
+    if (use_monotonic) {
+        t1_us = esp_timer_get_time();
+    }
 
     // Send NTP request
     if (sendto(sock, ntp_packet, sizeof(ntp_packet), 0,
@@ -145,7 +165,14 @@ static bool ntp_query_single(const char *server_ip, ntp_sample_t *sample, uint16
                      (struct sockaddr*)&server_addr, &socklen);
 
     // Capture T4 (client receive time)
-    int64_t t4_us = esp_timer_get_time();
+    int64_t t4_us;
+    if (use_monotonic) {
+        t4_us = esp_timer_get_time();
+    } else {
+        struct timeval t4_tv;
+        gettimeofday(&t4_tv, NULL);
+        t4_us = (int64_t)t4_tv.tv_sec * 1000000LL + (int64_t)t4_tv.tv_usec;
+    }
 
     close(sock);
 
@@ -174,8 +201,28 @@ static bool ntp_query_single(const char *server_ip, ntp_sample_t *sample, uint16
     // Calculate offset using NTP algorithm: theta = ((T2-T1) + (T3-T4)) / 2
     // We assume T2 ≈ T3 for simplicity (server processing time negligible)
     // So: theta ≈ T3 - (T1 + T4)/2
-    sample->theta_us = t3_unix_us - (t1_us + t4_us) / 2;
-    sample->rtt_us = t4_us - t1_us;
+    if (use_monotonic) {
+        // When using monotonic time, we need to calculate offset differently
+        // We can't directly compare monotonic time to Unix time
+        // Instead, set the offset to the full Unix time minus half RTT
+        int64_t rtt_us = t4_us - t1_us;
+        int64_t midpoint_us = t1_us + rtt_us / 2;
+        
+        // Get current system time to calculate how to adjust
+        struct timeval now_tv;
+        gettimeofday(&now_tv, NULL);
+        int64_t now_unix_us = (int64_t)now_tv.tv_sec * 1000000LL + (int64_t)now_tv.tv_usec;
+        int64_t now_mono_us = esp_timer_get_time();
+        
+        // The server time at midpoint was t3_unix_us
+        // Our monotonic time at midpoint was midpoint_us
+        // So offset = server_time - (system_time - mono_time + midpoint_mono)
+        sample->theta_us = t3_unix_us - now_unix_us + (now_mono_us - midpoint_us);
+        sample->rtt_us = rtt_us;
+    } else {
+        sample->theta_us = t3_unix_us - (t1_us + t4_us) / 2;
+        sample->rtt_us = t4_us - t1_us;
+    }
     sample->valid = true;
 
     return true;
@@ -231,47 +278,163 @@ static void pll_update(const ntp_sample_t *sample) {
 
     xSemaphoreTake(pll_mutex, portMAX_DELAY);
 
-    int64_t now_mono_us = esp_timer_get_time();
-    int64_t master_us = now_mono_us + sample->theta_us;  // Master time = local + offset
+    // Check if system time is initialized
+    struct timeval now_tv;
+    gettimeofday(&now_tv, NULL);
+    bool system_time_valid = (now_tv.tv_sec >= 1577836800); // Jan 1, 2020
+    
+    // If system time not valid and we have a large offset, set it first
+    if (!system_time_valid && llabs(sample->theta_us) > 1000000LL) {  // > 1 second
+        int64_t now_mono_us = esp_timer_get_time();
+        struct timeval tv;
+        gettimeofday(&tv, NULL);
+        int64_t current_unix_us = (int64_t)tv.tv_sec * 1000000LL + (int64_t)tv.tv_usec;
+        int64_t corrected_unix_us = current_unix_us + sample->theta_us;
+        
+        tv.tv_sec = corrected_unix_us / 1000000LL;
+        tv.tv_usec = corrected_unix_us % 1000000LL;
+        settimeofday(&tv, NULL);
+        ESP_LOGI(TAG, "System clock initialized from NTP: %ld.%06ld", tv.tv_sec, tv.tv_usec);
+        
+        // After setting system time, recalculate using the new system time
+        gettimeofday(&now_tv, NULL);
+    }
 
+    int64_t now_mono_us = esp_timer_get_time();
+    int64_t now_unix_us = (int64_t)now_tv.tv_sec * 1000000LL + (int64_t)now_tv.tv_usec;
+    
+    // For PLL, we track the relationship between monotonic time and Unix time
+    // This allows us to maintain precision even if system time jumps
+    
     if (!pll.valid) {
-        // First sample: just initialize
-        pll.a = 1.0;
-        pll.b = (double)sample->theta_us;
+        // First sample: initialize PLL
+        // The offset represents: unix_time = mono_time + offset
+        pll.a = 1.0;  // No skew initially
+        pll.b = (double)(now_unix_us - now_mono_us);
         pll.last_update_mono_us = now_mono_us;
-        pll.last_master_us = master_us;
+        pll.last_master_us = now_unix_us;
         pll.valid = true;
         pll.sample_count = 1;
 
-        ESP_LOGI(TAG, "PLL initialized: offset=%.1f µs", pll.b);
+        ESP_LOGI(TAG, "PLL initialized: offset=%.1f µs (system-mono delta)", pll.b);
     } else {
-        // Subsequent samples: simple exponential smoothing for offset
-        // For skew: track drift over time
-
-        int64_t dt_mono = now_mono_us - pll.last_update_mono_us;
-        int64_t dt_master = master_us - pll.last_master_us;
-
-        if (dt_mono > 1000000) {  // At least 1 second between updates for skew calculation
-            // Calculate observed skew
-            double new_a = (double)dt_master / (double)dt_mono;
-
-            // Smooth skew with time constant
-            double alpha_skew = 0.1;  // Slow adaptation for skew
-            pll.a = (1.0 - alpha_skew) * pll.a + alpha_skew * new_a;
-
-            pll.last_update_mono_us = now_mono_us;
-            pll.last_master_us = master_us;
+        // Subsequent samples: update PLL based on new measurement
+        // The sample offset tells us how much to adjust our current time estimate
+        
+        int64_t expected_unix_us = (int64_t)(pll.a * (double)now_mono_us + pll.b);
+        int64_t actual_unix_us = now_unix_us + sample->theta_us;
+        int64_t error_us = actual_unix_us - expected_unix_us;
+        
+        // Apply clock corrections based on the raw NTP offset BEFORE updating PLL state
+        // Use sample->theta_us for corrections, not the PLL error
+        bool correction_applied = false;
+        int64_t correction_us = 0;
+        int64_t offset_to_correct = sample->theta_us;  // Use raw NTP offset for corrections
+        
+        if (llabs(offset_to_correct) > MIN_CORRECTION_US) {
+            if (llabs(offset_to_correct) < SLEW_THRESHOLD_US) {
+                // SLEWING: Apply gradual correction for small offsets
+                // Be more aggressive for persistent offsets
+                correction_us = offset_to_correct;
+                
+                // Increase correction rate if offset persists
+                int64_t max_correction = MAX_SLEW_RATE_US;
+                if (pll.correction_count > 5 && llabs(offset_to_correct) > 2000) {
+                    // Double the correction rate for persistent offsets > 2ms
+                    max_correction = MAX_SLEW_RATE_US * 2;
+                }
+                
+                if (llabs(correction_us) > max_correction) {
+                    correction_us = (error_us > 0) ? max_correction : -max_correction;
+                }
+                
+                // Apply partial correction
+                struct timeval tv;
+                gettimeofday(&tv, NULL);
+                int64_t current_us = (int64_t)tv.tv_sec * 1000000LL + (int64_t)tv.tv_usec;
+                int64_t corrected_us = current_us + correction_us;
+                
+                tv.tv_sec = corrected_us / 1000000LL;
+                tv.tv_usec = corrected_us % 1000000LL;
+                settimeofday(&tv, NULL);
+                
+                pll.total_correction_us += correction_us;
+                pll.correction_count++;
+                correction_applied = true;
+                
+                ESP_LOGD(TAG, "Clock slew: applied %+" PRId64 " µs correction (offset was %+" PRId64 " µs, total corrections: %+" PRId64 " µs)",
+                         correction_us, offset_to_correct, pll.total_correction_us);
+                
+                // Log convergence progress periodically
+                if (pll.correction_count % 10 == 0) {
+                    ESP_LOGI(TAG, "Clock slewing in progress: current offset=%+.3f ms, corrections applied=%d, total correction=%+.3f ms",
+                             (double)offset_to_correct / 1000.0, pll.correction_count, (double)pll.total_correction_us / 1000.0);
+                }
+                
+            } else if (llabs(offset_to_correct) < STEP_THRESHOLD_US) {
+                // STEPPING: Immediate correction for medium offsets
+                struct timeval tv;
+                tv.tv_sec = actual_unix_us / 1000000LL;
+                tv.tv_usec = actual_unix_us % 1000000LL;
+                settimeofday(&tv, NULL);
+                
+                correction_us = error_us;
+                pll.total_correction_us += error_us;
+                pll.correction_count++;
+                correction_applied = true;
+                
+                ESP_LOGI(TAG, "Clock step: corrected %+.3f ms offset (total corrections: %+" PRId64 " µs)",
+                         (double)offset_to_correct / 1000.0, pll.total_correction_us);
+                
+            } else {
+                // Large offset - step with warning
+                ESP_LOGW(TAG, "Large time offset detected: %.3f seconds", (double)offset_to_correct / 1e6);
+                
+                struct timeval tv;
+                tv.tv_sec = actual_unix_us / 1000000LL;
+                tv.tv_usec = actual_unix_us % 1000000LL;
+                settimeofday(&tv, NULL);
+                
+                correction_us = error_us;
+                pll.total_correction_us += error_us;
+                pll.correction_count++;
+                correction_applied = true;
+                
+                ESP_LOGI(TAG, "System clock adjusted from NTP: %ld.%06ld (large step)", tv.tv_sec, tv.tv_usec);
+            }
+            
+            // Don't reduce PLL error - let it track naturally
+        } else {
+            // Offset below minimum threshold - log convergence if we were correcting
+            if (pll.correction_count > 0 && llabs(pll.last_error_us) > MIN_CORRECTION_US) {
+                ESP_LOGI(TAG, "Clock converged: offset now within %+" PRId64 " µs (below %lld µs threshold)",
+                         offset_to_correct, MIN_CORRECTION_US);
+            }
         }
-
-        // Smooth offset with faster time constant
+        
+        // Update offset with exponential smoothing using the original PLL error
         double alpha_offset = 0.3;
-        pll.b = (1.0 - alpha_offset) * pll.b + alpha_offset * (double)sample->theta_us;
-
+        pll.b += alpha_offset * (double)error_us;  // Use original PLL error for tracking
+        
+        // Update skew if enough time has passed
+        int64_t dt_mono = now_mono_us - pll.last_update_mono_us;
+        if (dt_mono > 1000000) {  // At least 1 second
+            int64_t dt_master = actual_unix_us - pll.last_master_us;
+            double new_a = (double)dt_master / (double)dt_mono;
+            
+            double alpha_skew = 0.1;
+            pll.a = (1.0 - alpha_skew) * pll.a + alpha_skew * new_a;
+            
+            pll.last_update_mono_us = now_mono_us;
+            pll.last_master_us = actual_unix_us;
+        }
+        
         pll.sample_count++;
-
+        pll.last_error_us = error_us;  // Store the adjusted error after correction
+        
         double skew_ppm = (pll.a - 1.0) * 1e6;
-        ESP_LOGD(TAG, "PLL updated: offset=%.1f µs, skew=%.1f ppm, samples=%d",
-                 pll.b, skew_ppm, pll.sample_count);
+        ESP_LOGD(TAG, "PLL updated: offset=%.1f µs, skew=%.1f ppm, error=%.1f µs (after correction), samples=%d",
+                 pll.b, skew_ppm, (double)error_us, pll.sample_count);
     }
 
     xSemaphoreGive(pll_mutex);
@@ -421,6 +584,9 @@ static void ntp_client_task(void *pvParameters) {
                             xSemaphoreTake(pll_mutex, portMAX_DELAY);
                             pll.valid = false;
                             pll.sample_count = 0;
+                            pll.total_correction_us = 0;
+                            pll.correction_count = 0;
+                            pll.last_error_us = 0;
                             probe_count = 0;  // Restart fast probing
                             xSemaphoreGive(pll_mutex);
                         } else {
@@ -470,6 +636,9 @@ static void ntp_client_task(void *pvParameters) {
                                 xSemaphoreTake(pll_mutex, portMAX_DELAY);
                                 pll.valid = false;
                                 pll.sample_count = 0;
+                                pll.total_correction_us = 0;
+                                pll.correction_count = 0;
+                                pll.last_error_us = 0;
                                 probe_count = 0;  // Restart fast probing
                                 xSemaphoreGive(pll_mutex);
                             } else {
@@ -505,6 +674,23 @@ static void ntp_client_task(void *pvParameters) {
         if (sntp_initialized) {
             gettimeofday(&last_known_time, NULL);
             last_known_time_us = esp_timer_get_time();
+
+            // Log SNTP sync status periodically
+            static TickType_t last_status_log = 0;
+            TickType_t now = xTaskGetTickCount();
+            if ((now - last_status_log) >= pdMS_TO_TICKS(10000)) {  // Every 10 seconds
+                sntp_sync_status_t status = esp_sntp_get_sync_status();
+                const char* status_str = "UNKNOWN";
+                switch (status) {
+                    case SNTP_SYNC_STATUS_RESET: status_str = "RESET"; break;
+                    case SNTP_SYNC_STATUS_COMPLETED: status_str = "COMPLETED"; break;
+                    case SNTP_SYNC_STATUS_IN_PROGRESS: status_str = "IN_PROGRESS"; break;
+                    default: break;
+                }
+                ESP_LOGI(TAG, "SNTP status: %s, System time: %ld.%06ld",
+                         status_str, last_known_time.tv_sec, last_known_time.tv_usec);
+                last_status_log = now;
+            }
         }
 
         // NTP micro-probe for precision audio sync
@@ -603,6 +789,32 @@ extern "C" bool ntp_get_pll_state(double *offset_us, double *skew_ppm) {
 
     xSemaphoreGive(pll_mutex);
     return valid;
+}
+
+/**
+ * @brief Get current PLL convergence status
+ *
+ * @param corrections_applied Output: total number of corrections applied (can be NULL)
+ * @param total_correction_us Output: total correction amount in microseconds (can be NULL)
+ * @param current_error_us Output: current error in microseconds (can be NULL)
+ * @return true if PLL is valid and converged (error < MIN_CORRECTION_US), false otherwise
+ */
+extern "C" bool ntp_get_convergence_status(int *corrections_applied, int64_t *total_correction_us, int64_t *current_error_us) {
+    if (!pll_mutex) return false;
+    
+    xSemaphoreTake(pll_mutex, portMAX_DELAY);
+    
+    bool converged = false;
+    if (pll.valid) {
+        if (corrections_applied) *corrections_applied = pll.correction_count;
+        if (total_correction_us) *total_correction_us = pll.total_correction_us;
+        if (current_error_us) *current_error_us = pll.last_error_us;
+        
+        converged = (llabs(pll.last_error_us) < MIN_CORRECTION_US);
+    }
+    
+    xSemaphoreGive(pll_mutex);
+    return converged;
 }
 
 /**

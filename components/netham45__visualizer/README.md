@@ -793,8 +793,8 @@ for (int i = 0; i < num_leds; i++) {
 }
 
 // New: Visualizer component
-visualizer_init();
-visualizer_feed_pcm(audio_data, audio_size);
+//visualizer_init();
+//visualizer_feed_pcm(audio_data, audio_size);
 // LEDs update automatically!
 ```
 
@@ -805,10 +805,9 @@ fft_compute(audio_buffer, fft_output);
 map_fft_to_leds(fft_output, led_buffer);
 
 // New: PPM-based visualization (lower latency)
-visualizer_init();
-visualizer_set_color_scheme(LED_COLOR_RAINBOW);
-visualizer_feed_pcm(audio_buffer, buffer_size);
-// Future: FFT mode will be added as an option
+//visualizer_init();
+//visualizer_set_color_scheme(LED_COLOR_RAINBOW);
+//visualizer_feed_pcm(audio_buffer, buffer_size);
 ```
 
 ## Future Enhancements

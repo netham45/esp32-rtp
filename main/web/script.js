@@ -2306,41 +2306,6 @@ function clearLogs() {
     });
 }
 
-// Download logs
-function downloadLogs() {
-    updateLogsStatus('info', 'Preparing download...');
-    
-    // Fetch all logs for download
-    queueRequest('/api/logs?lines=1000')
-        .then(response => response.json())
-        .then(data => {
-            const logs = data.logs || [];
-            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-            const filename = `esp32-logs-${timestamp}.txt`;
-            
-            // Create blob and download
-            const content = logs.join('\n');
-            const blob = new Blob([content], { type: 'text/plain' });
-            const url = URL.createObjectURL(blob);
-            
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = filename;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-            
-            updateLogsStatus('success', 'Downloaded');
-            showToast('Logs downloaded successfully', 'success');
-        })
-        .catch(error => {
-            console.error('Failed to download logs:', error);
-            updateLogsStatus('error', 'Download failed');
-            showToast('Failed to download logs: ' + error.message, 'error');
-        });
-}
-
 // Toggle auto-refresh
 function toggleAutoRefresh() {
     const checkbox = $('#log-auto-refresh');
@@ -2465,7 +2430,6 @@ window.switchTab = function(tabName, skipAnimation) {
 // Make logs functions available globally
 window.refreshLogs = refreshLogs;
 window.clearLogs = clearLogs;
-window.downloadLogs = downloadLogs;
 window.toggleAutoRefresh = toggleAutoRefresh;
 window.toggleAutoScroll = toggleAutoScroll;
 window.updateLogLineCount = updateLogLineCount;

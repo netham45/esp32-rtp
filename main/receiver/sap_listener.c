@@ -131,7 +131,7 @@ esp_err_t sap_listener_start(void) {
     ret = xTaskCreatePinnedToCore(
         sap_cleanup_task,
         "sap_cleanup",
-        2048,
+        4096,
         NULL,
         5,
         &s_sap_state.cleanup_task,

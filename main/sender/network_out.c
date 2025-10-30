@@ -91,10 +91,6 @@ static TaskHandle_t s_sap_task_handle = NULL;
 static char s_device_name[32] = "ESP32-Audio";
 static char s_local_ip[16] = {0};
 
-// Buffer for audio data
-static unsigned char rtp_packet[PACKET_SIZE];
-char audio_buffer[CHUNK_SIZE];
-
 // Forward declarations for multicast helper functions
 static bool is_multicast_address(const char *ip_str);
 static esp_err_t handle_multicast_membership(int sock, const char *multicast_ip, bool join);
@@ -575,6 +571,8 @@ static esp_err_t handle_multicast_membership(int sock, const char *multicast_ip,
 
 static void rtp_sender_task(void *arg)
 {
+    static unsigned char rtp_packet[PACKET_SIZE];
+    char audio_buffer[CHUNK_SIZE];
     size_t bytes_in_buffer = 0;
 
     // For pacing the sender to match the audio rate
@@ -676,6 +674,7 @@ static void rtp_sender_task(void *arg)
             // that can overwhelm the network stack and cause ENOMEM (errno 12) errors.
             vTaskDelayUntil(&xLastWakeTime, xFrequency);
         }
+        vTaskDelay(0);
     }
     
     ESP_LOGI(TAG, "RTP sender task exiting, deleting task");

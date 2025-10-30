@@ -624,14 +624,14 @@ esp_err_t config_manager_save_config(void) {
     ESP_LOGI(TAG, "Saved direct write setting: %d", s_app_config.use_direct_write);
     
     // Commit the changes (fully stop visualizer to avoid RMT during flash commit)
-    bool viz_was_active = visualizer_is_active();
-    if (viz_was_active) {
-        visualizer_deinit();
-    }
+//    bool viz_was_active = visualizer_is_active();
+    //if (viz_was_active) {
+//        visualizer_deinit();
+   // }
     err = nvs_commit(nvs_handle);
-    if (viz_was_active) {
-        visualizer_init();
-    }
+  //  if (viz_was_active) {
+//        visualizer_init();
+   // }
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Error committing changes to NVS: %s", esp_err_to_name(err));
         nvs_close(nvs_handle);
@@ -724,14 +724,14 @@ esp_err_t config_manager_save_config(void) {
     ESP_LOGI(TAG, "Saved device_mode: %d", s_app_config.device_mode);
     
     // Commit the changes (fully stop visualizer to avoid RMT during flash commit)
-    viz_was_active = visualizer_is_active();
-    if (viz_was_active) {
-        visualizer_deinit();
-    }
+//    viz_was_active = visualizer_is_active();
+   // if (viz_was_active) {
+//        visualizer_deinit();
+//    }
     err = nvs_commit(nvs_handle);
-    if (viz_was_active) {
-        visualizer_init();
-    }
+  //  if (viz_was_active) {
+//        visualizer_init();
+   // }
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Error committing changes to NVS: %s", esp_err_to_name(err));
         nvs_close(nvs_handle);
@@ -905,14 +905,14 @@ esp_err_t config_manager_save_setting(const char* key, void* value, size_t size)
     }
     
     // Commit the changes (fully stop visualizer to avoid RMT during flash commit)
-    bool viz_was_active2 = visualizer_is_active();
-    if (viz_was_active2) {
-        visualizer_deinit();
-    }
+//    bool viz_was_active2 = visualizer_is_active();
+   // if (viz_was_active2) {
+//        visualizer_deinit();
+//    }
     err = nvs_commit(nvs_handle);
-    if (viz_was_active2) {
-        visualizer_init();
-    }
+   // if (viz_was_active2) {
+//        visualizer_init();
+  //  }
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Error committing changes to NVS: %s", esp_err_to_name(err));
     }
@@ -955,14 +955,14 @@ esp_err_t config_manager_reset(void) {
     }
     
     // Commit the changes (fully stop visualizer to avoid RMT during flash commit)
-    bool viz_was_active3 = visualizer_is_active();
-    if (viz_was_active3) {
-        visualizer_deinit();
-    }
+//    bool viz_was_active3 = visualizer_is_active();
+  //if (viz_was_active3) {
+//        visualizer_deinit();
+  //  }
     err = nvs_commit(nvs_handle);
-    if (viz_was_active3) {
-        visualizer_init();
-    }
+   // if (viz_was_active3) {
+//        visualizer_init();
+   // }
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Error committing changes to NVS: %s", esp_err_to_name(err));
     }

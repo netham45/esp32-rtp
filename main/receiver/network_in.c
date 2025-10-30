@@ -5,6 +5,7 @@
 #include "build_config.h"
 #include "network_in.h"
 #include "global.h"
+
 #include "audio_out.h"
 #include "spdif_out.h"
 #include "lifecycle_manager.h"
@@ -353,12 +354,12 @@ static void udp_handler(void *pvParameters) {
 #ifdef CONFIG_RTCP_ENABLED
         // Check if this is an RTCP packet
         if (is_rtcp) {
-            ESP_LOGD(TAG, "Received RTCP packet: %d bytes from %s:%d",
+            ESP_LOGI(TAG, "Received RTCP packet: %d bytes from %s:%d",
                     len, inet_ntoa(source_addr.sin_addr), ntohs(source_addr.sin_port));
             
             // Parse RTCP packet
             if (rtcp_parse_packet((uint8_t *)rx_buffer, len) == ESP_OK) {
-                ESP_LOGD(TAG, "RTCP packet parsed successfully");
+                ESP_LOGI(TAG, "RTCP packet parsed successfully");
             }
             continue;  // RTCP packets don't contain audio data
         }
@@ -649,7 +650,7 @@ esp_err_t network_init(void) {
     
     create_udp_server();
 
-    xTaskCreatePinnedToCore(udp_handler, "udp_handler", 12000, NULL,
+    xTaskCreatePinnedToCore(udp_handler, "udp_handler", 8192, NULL,
                            5, &udp_handler_task, 1);
 
     // SAP listener functionality moved to sap_listener module

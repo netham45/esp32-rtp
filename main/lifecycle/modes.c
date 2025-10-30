@@ -103,7 +103,7 @@ static esp_err_t start_mode_sender_usb(void) {
 
     // Initialize visualizer for audio visualization
     
-    ret = visualizer_init();
+//    ret = visualizer_init();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize visualizer: %s", esp_err_to_name(ret));
         // Non-critical, continue
@@ -137,7 +137,8 @@ static esp_err_t start_mode_sender_usb(void) {
 static esp_err_t stop_mode_sender_usb(void) {
     ESP_LOGI(TAG, "Stopping USB sender mode...");
     // Stop RTP sender first
-    esp_err_t ret = visualizer_deinit();
+//    esp_err_t ret = visualizer_deinit();
+    esp_err_t ret = ESP_OK;
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to stop visualizer: %s", esp_err_to_name(ret));
     }
@@ -191,7 +192,7 @@ static esp_err_t start_mode_sender_spdif(void) {
         return ret;
     }
 
-    ret = visualizer_init();
+//    ret = visualizer_init();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize visualizer: %s", esp_err_to_name(ret));
         // Non-critical, continue
@@ -226,7 +227,7 @@ static esp_err_t stop_mode_sender_spdif(void) {
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to stop S/PDIF receiver: %s", esp_err_to_name(ret));
     }
-    ret = visualizer_deinit();
+//    ret = visualizer_deinit();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to stop visualizer: %s", esp_err_to_name(ret));
     }
@@ -292,7 +293,7 @@ static esp_err_t start_mode_receiver_usb(void) {
     
     // Initialize visualizer for audio visualization
     
-    ret = visualizer_init();
+//    ret = visualizer_init();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize visualizer: %s", esp_err_to_name(ret));
         // Non-critical, continue
@@ -308,7 +309,8 @@ static esp_err_t stop_mode_receiver_usb(void) {
     ESP_LOGI(TAG, "Stopping USB receiver mode...");
     
     // Stop visualizer first
-    esp_err_t ret = visualizer_deinit();
+//    esp_err_t ret = visualizer_deinit();
+    esp_err_t ret = ESP_OK;
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to stop visualizer: %s", esp_err_to_name(ret));
     }
@@ -406,7 +408,7 @@ static esp_err_t start_mode_receiver_spdif(void) {
     
     // Initialize visualizer for audio visualization
     
-    ret = visualizer_init();
+//    ret = visualizer_init();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize visualizer: %s", esp_err_to_name(ret));
         // Non-critical, continue
@@ -422,7 +424,8 @@ static esp_err_t stop_mode_receiver_spdif(void) {
     ESP_LOGI(TAG, "Stopping S/PDIF receiver mode...");
     
     // Stop visualizer first
-    esp_err_t ret = visualizer_deinit();
+//    esp_err_t ret = visualizer_deinit();
+    esp_err_t ret = ESP_OK;
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to stop visualizer: %s", esp_err_to_name(ret));
     }

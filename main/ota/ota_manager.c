@@ -632,7 +632,7 @@ esp_err_t ota_manager_calculate_crc32(uint32_t *crc32) {
     }
     
     // Read and calculate CRC32 in chunks
-    const size_t chunk_size = 4096;
+    const size_t chunk_size = 2048;
     uint8_t *buffer = malloc(chunk_size);
     if (!buffer) {
         return ESP_ERR_NO_MEM;

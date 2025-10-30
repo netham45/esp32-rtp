@@ -110,7 +110,7 @@ esp_err_t pcm_viz_init(void) {
     BaseType_t task_ret = xTaskCreatePinnedToCore(
         pcm_viz_task,
         "pcm_viz",
-        8192,
+        4096,
         NULL,
         5,  // Priority
         &viz_task_handle,

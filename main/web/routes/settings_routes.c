@@ -5,7 +5,6 @@
 #include "cJSON.h"
 #include "config.h"
 #include "esp_log.h"
-#include "visualizer_task.h"
 #include <string.h>
 
 #define TAG "settings_routes"
@@ -18,16 +17,16 @@ static esp_err_t settings_get_handler(httpd_req_t *req)
     ESP_LOGI(TAG, "Handling GET request for /api/settings");
 
     // Suspend LED visualizer to avoid any RMT/DMA ISR during flash/NVS operations
-    bool viz_was_active = visualizer_is_active();
-    if (viz_was_active) {
-        visualizer_suspend();
-    }
+//    bool viz_was_active = visualizer_is_active();
+    //if (viz_was_active) {
+//        visualizer_suspend();
+   // }
 
     // Create JSON response
     cJSON *root = cJSON_CreateObject();
     if (!root) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to create JSON response");
-        if (viz_was_active) visualizer_resume();
+//        if (viz_was_active) visualizer_resume();
         return ESP_FAIL;
     }
 
@@ -107,7 +106,7 @@ static esp_err_t settings_get_handler(httpd_req_t *req)
     if (!json_str) {
         cJSON_Delete(root);
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to create JSON string");
-        if (viz_was_active) visualizer_resume();
+//        if (viz_was_active) visualizer_resume();
         return ESP_FAIL;
     }
 
@@ -122,9 +121,9 @@ static esp_err_t settings_get_handler(httpd_req_t *req)
     cJSON_Delete(root);
 
     // Restart visualizer after sending JSON
-    if (viz_was_active) {
-        visualizer_resume();
-    }
+  //  if (viz_was_active) {
+//        visualizer_resume();
+   // }
     return ret;
 }
 
@@ -169,10 +168,10 @@ static esp_err_t settings_post_handler(httpd_req_t *req)
     }
 
     // Suspend LED visualizer during configuration writes to avoid RMT/IRAM issues during NVS commits
-    bool viz_was_active = visualizer_is_active();
-    if (viz_was_active) {
-        visualizer_suspend();
-    }
+//    bool viz_was_active = visualizer_is_active();
+   // if (viz_was_active) {
+//        visualizer_suspend();
+    //}
 
     // Prepare batch update structure
     lifecycle_config_update_t updates = (lifecycle_config_update_t){0};
@@ -388,7 +387,7 @@ static esp_err_t settings_post_handler(httpd_req_t *req)
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "Failed to set setup wizard completed status: %s", esp_err_to_name(err));
             cJSON_Delete(root);
-            if (viz_was_active) visualizer_resume();
+//            if (viz_was_active) visualizer_resume();
             httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to set setup wizard status");
             return ESP_FAIL;
         }
@@ -399,7 +398,7 @@ static esp_err_t settings_post_handler(httpd_req_t *req)
     err = lifecycle_update_config_batch(&updates);
     if (err != ESP_OK) {
         cJSON_Delete(root);
-        if (viz_was_active) visualizer_resume();
+//        if (viz_was_active) visualizer_resume();
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to update configuration");
         return ESP_FAIL;
     }
@@ -425,7 +424,7 @@ static esp_err_t settings_post_handler(httpd_req_t *req)
     cJSON_Delete(root);
 
     // Resume visualizer after configuration save/update completes
-    if (viz_was_active) visualizer_resume();
+//    if (viz_was_active) visualizer_resume();
 
     // Send success response
     httpd_resp_set_type(req, "application/json");

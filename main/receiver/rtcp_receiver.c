@@ -361,6 +361,10 @@ esp_err_t rtcp_parse_packet(const uint8_t *packet, size_t len) {
                     sync_info->last_sr_ntp_sec  = ntp_sec;
                     sync_info->last_sr_ntp_frac = ntp_frac;
 
+                    // NTP-anchored playout mapping: compute offsets for sender NTP → receiver NTP → monotonic
+                    sync_info->offset_ntp_to_receiver_us = (int64_t)receiver_ntp_us - (int64_t)sender_ntp_us;
+                    sync_info->wall_to_mono_offset_us = (int64_t)mono_now - (int64_t)receiver_ntp_us;
+
                     // Compute offset between receiver and sender NTP clocks (should be small, ±microseconds to milliseconds)
                     int64_t new_b = (int64_t)receiver_ntp_us - (int64_t)sender_ntp_us;
                     bool seeded = (sync_info->rtp_sr_base64 != 0 && sync_info->ntp_sr_base_us != 0 && sync_info->mono_sr_base_us != 0);
@@ -514,7 +518,8 @@ esp_err_t rtcp_parse_packet(const uint8_t *packet, size_t len) {
     return ESP_OK;
 }
 
-// Calculate playout time for an RTP packet using per-SSRC linear mapping (RTP ticks -> NTP us -> mono us)
+// Calculate playout time for an RTP packet using NTP-anchored playout mapping
+// Maps: sender NTP → receiver NTP → monotonic for explicit wall-clock correlation
 esp_err_t rtcp_calculate_playout_time(uint32_t ssrc, uint32_t rtp_timestamp, uint64_t *playout_time) {
     if (!playout_time) {
         return ESP_ERR_INVALID_ARG;
@@ -524,22 +529,12 @@ esp_err_t rtcp_calculate_playout_time(uint32_t ssrc, uint32_t rtp_timestamp, uin
         return ESP_ERR_INVALID_STATE;
     }
 
-    // 1) Unwrap RTP timestamp without holding RTCP mutex (unwrap locks internally)
-    uint64_t rtp64 = 0;
-    if (rtcp_unwrap_rtp_timestamp(ssrc, rtp_timestamp, &rtp64) != ESP_OK) {
-        // No stable unwrap or state yet; signal caller to fallback
-        return ESP_ERR_NOT_FOUND;
-    }
-
-    // 2) Snapshot mapping fields under mutex
-    double   slope_a_us_per_tick = 0.0;
-    int64_t  offset_b_mono_us    = 0;
-    uint64_t rtp_sr_base64       = 0;
-    uint64_t ntp_sr_base_us      = 0;
-    uint64_t mono_sr_base_us     = 0;
-    uint64_t baseline_ntp_us     = 0;
-    uint64_t baseline_mono_us    = 0;
-    bool     baseline_valid      = false;
+    // Snapshot sync info fields under mutex
+    uint32_t last_sr_rtp32 = 0;
+    uint64_t mono_sr_base_us = 0;
+    uint64_t ntp_sr_base_us = 0;
+    int64_t offset_ntp_to_receiver_us = 0;
+    int64_t wall_to_mono_offset_us = 0;
 
     xSemaphoreTake(rtcp_mutex, portMAX_DELAY);
     rtcp_sync_info_t *sync_info = NULL;
@@ -550,67 +545,60 @@ esp_err_t rtcp_calculate_playout_time(uint32_t ssrc, uint32_t rtp_timestamp, uin
         }
     }
     if (sync_info) {
-        slope_a_us_per_tick = sync_info->slope_a_us_per_tick;
-        offset_b_mono_us    = sync_info->offset_b_mono_us;
-        rtp_sr_base64       = sync_info->rtp_sr_base64;
-        ntp_sr_base_us      = sync_info->ntp_sr_base_us;
-        mono_sr_base_us     = sync_info->mono_sr_base_us;
-        baseline_ntp_us     = sync_info->ntp_to_mono_baseline_ntp_us;
-        baseline_mono_us    = sync_info->ntp_to_mono_baseline_mono_us;
-        baseline_valid      = sync_info->ntp_to_mono_baseline_valid;
+        last_sr_rtp32 = sync_info->last_sr_rtp32;
+        mono_sr_base_us = sync_info->mono_sr_base_us;
+        ntp_sr_base_us = sync_info->ntp_sr_base_us;
+        offset_ntp_to_receiver_us = sync_info->offset_ntp_to_receiver_us;
+        wall_to_mono_offset_us = sync_info->wall_to_mono_offset_us;
     }
     xSemaphoreGive(rtcp_mutex);
 
-    // 3) Enforce SR freshness/validity before using the mapping
+    if (!sync_info) {
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    // Verify SR freshness using existing max-age logic
     uint64_t now_mono_us = esp_timer_get_time();
     uint64_t sr_age_us = (mono_sr_base_us > 0 && now_mono_us >= mono_sr_base_us)
                            ? (now_mono_us - mono_sr_base_us)
                            : UINT64_MAX;
     uint64_t max_age_us = (uint64_t)CONFIG_RTCP_SR_MAX_AGE_MS * 1000ULL;
-    bool seeded = (rtp_sr_base64 != 0 && ntp_sr_base_us != 0 && mono_sr_base_us != 0);
-    if (!seeded || slope_a_us_per_tick <= 0.0 || !isfinite(slope_a_us_per_tick) || sr_age_us > max_age_us) {
+    
+    // Check if SR has been received (mono_sr_base_us != 0) and is fresh
+    if (mono_sr_base_us == 0 || sr_age_us > max_age_us) {
 #ifdef CONFIG_RTCP_LOG_SYNC_INFO
         static uint32_t stale_log_counter = 0;
         if ((++stale_log_counter % 200) == 0) {
             uint64_t age_ms = (sr_age_us == UINT64_MAX) ? 0ULL : (sr_age_us / 1000ULL);
-            ESP_LOGW(TAG, "Sync stale/invalid: SSRC=0x%08X age=%llu ms seeded=%d slope=%f",
+            ESP_LOGW(TAG, "Sync stale/invalid: SSRC=0x%08X age=%llu ms sr_base=%llu",
                      ssrc,
                      (unsigned long long)age_ms,
-                     (int)seeded,
-                     slope_a_us_per_tick);
+                     (unsigned long long)mono_sr_base_us);
         }
 #endif
         return ESP_ERR_NOT_FOUND;
     }
 
-    // 3) Map RTP ticks -> sender NTP time -> receiver NTP time -> monotonic time
-    // Step 1: Calculate packet time in sender's NTP domain
-    int64_t delta_ticks = (int64_t)rtp64 - (int64_t)rtp_sr_base64;
-    double packet_sender_ntp_d = (double)ntp_sr_base_us + (double)delta_ticks * slope_a_us_per_tick;
-    int64_t packet_sender_ntp_us = (int64_t)packet_sender_ntp_d;
-
-    // Step 2: Convert to receiver's NTP domain using offset_b (offset_b = receiver_ntp - sender_ntp)
-    int64_t packet_receiver_ntp_us = packet_sender_ntp_us + offset_b_mono_us;
-
-    // Step 3: Convert from receiver NTP time to receiver monotonic time using stable baseline
-    if (!baseline_valid) {
-        ESP_LOGW(TAG, "NTP→mono baseline not yet established for SSRC 0x%08X", ssrc);
-        return ESP_ERR_NOT_FOUND;
-    }
-
-    // packet_mono = baseline_mono + (packet_receiver_ntp - baseline_ntp)
-    // This ensures all speakers use the same NTP→monotonic reference point established at RTCP lock
-    int64_t ntp_delta_from_baseline = (int64_t)packet_receiver_ntp_us - (int64_t)baseline_ntp_us;
-    int64_t packet_mono_us = (int64_t)baseline_mono_us + ntp_delta_from_baseline;
-
+    // NTP-anchored playout mapping: sender_NTP → receiver_NTP → monotonic (wall_to_mono_offset_us)
+    // Step 1: Compute sender's NTP time of the packet using SR anchor and nominal slope
+    int32_t delta_ticks = (int32_t)(rtp_timestamp - last_sr_rtp32);
+    double a0 = 1000000.0 / (double)CONFIG_SAMPLE_RATE;  // nominal microseconds per RTP tick
+    int64_t packet_sender_ntp_us = (int64_t)ntp_sr_base_us + (int64_t)((double)delta_ticks * a0);
+    
+    // Step 2: Convert to receiver NTP using offset
+    int64_t packet_receiver_ntp_us = packet_sender_ntp_us + offset_ntp_to_receiver_us;
+    
+    // Step 3: Convert to monotonic scheduling time
     uint64_t target_latency_us = (uint64_t)CONFIG_RTCP_TARGET_LATENCY_MS * 1000ULL;
-    int64_t playout_i64 = packet_mono_us + (int64_t)target_latency_us;
+    int64_t playout_i64 = packet_receiver_ntp_us + wall_to_mono_offset_us + (int64_t)target_latency_us;
+    
+    // Clamp negative values to 0
     if (playout_i64 < 0) {
         playout_i64 = 0;
     }
     *playout_time = (uint64_t)playout_i64;
 
-    // Outlier early/late rejection relative to now
+    // Keep existing outlier early/late rejection based on playout_time - now_mono_us
     int64_t ahead_us = (int64_t)(*playout_time) - (int64_t)now_mono_us;
     if (ahead_us > (int64_t)CONFIG_RTCP_OUTLIER_MAX_EARLY_MS * 1000LL) {
 #ifdef CONFIG_RTCP_LOG_SYNC_INFO
@@ -634,15 +622,20 @@ esp_err_t rtcp_calculate_playout_time(uint32_t ssrc, uint32_t rtp_timestamp, uin
     }
 
 #ifdef CONFIG_RTCP_LOG_SYNC_INFO
+    // Low-rate diagnostic logging to validate NTP-anchored playout mapping
     static uint32_t log_counter = 0;
     if (++log_counter % 100 == 0) {
-        ESP_LOGI(TAG, "Playout SSRC=0x%08X dt=%lld ticks sender_ntp=%lld rcvr_ntp=%lld mono=%lld out=%llu",
+        ESP_LOGI(TAG, "NTP-map: ssrc=0x%08X rtp=%u sr_rtp=%u dt=%ld a0=%.6f ntp_sr=%llu off_ntp=%lld off_w2m=%lld out=%llu now=%llu",
                  ssrc,
-                 (long long)delta_ticks,
-                 (long long)packet_sender_ntp_us,
-                 (long long)packet_receiver_ntp_us,
-                 (long long)packet_mono_us,
-                 (unsigned long long)*playout_time);
+                 rtp_timestamp,
+                 last_sr_rtp32,
+                 (long)delta_ticks,
+                 a0,
+                 (unsigned long long)ntp_sr_base_us,
+                 (long long)offset_ntp_to_receiver_us,
+                 (long long)wall_to_mono_offset_us,
+                 (unsigned long long)*playout_time,
+                 (unsigned long long)now_mono_us);
     }
 #endif
 
