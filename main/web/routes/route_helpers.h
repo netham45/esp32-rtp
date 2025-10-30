@@ -34,6 +34,21 @@ extern "C" {
 esp_err_t send_html_chunked(httpd_req_t *req, const char* html_start, size_t html_size);
 
 /**
+ * @brief Send static content without modification using chunked transfer
+ *
+ * This helper streams large embedded assets (CSS/JS/HTML) directly from flash
+ * in manageable pieces. Using chunked transfer avoids the large temporary
+ * allocations performed by httpd_resp_send() when asked to write big payloads
+ * in a single call.
+ *
+ * @param req HTTP request structure
+ * @param data_start Pointer to the start of the embedded data
+ * @param data_size Size of the embedded data in bytes
+ * @return ESP_OK on success, ESP_FAIL on error
+ */
+esp_err_t send_static_chunked(httpd_req_t *req, const uint8_t *data_start, size_t data_size);
+
+/**
  * @brief URL decode a string (application/x-www-form-urlencoded)
  * 
  * Decodes URL-encoded strings by:
