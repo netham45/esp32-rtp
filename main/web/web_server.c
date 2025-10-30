@@ -36,7 +36,7 @@ esp_err_t web_server_start(void)
     
     // IMPORTANT: Increase task stack size to handle complex requests
     // Default is 4096 which may be too small for our needs
-    config.stack_size = 3072;
+    config.stack_size = 6144;
     
     // Set task priority to ensure responsiveness
     config.task_priority = 8;  // Higher priority for better responsiveness

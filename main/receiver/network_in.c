@@ -650,7 +650,7 @@ esp_err_t network_init(void) {
     
     create_udp_server();
 
-    xTaskCreatePinnedToCore(udp_handler, "udp_handler", 2048, NULL,
+    xTaskCreatePinnedToCore(udp_handler, "udp_handler", 6144, NULL,
                            5, &udp_handler_task, 1);
 
     // SAP listener functionality moved to sap_listener module
