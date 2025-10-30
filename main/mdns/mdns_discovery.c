@@ -6,10 +6,8 @@
 #include <string.h>
 #include <time.h>
 #include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
 #include "freertos/semphr.h"
 #include <arpa/inet.h>
-#include "esp_timer.h"
 #include "lifecycle_manager.h"
 
 static const char *TAG = "mdns_discovery";
@@ -18,12 +16,15 @@ static const char *TAG = "mdns_discovery";
 #define MDNS_QUERY_TIMEOUT_MS 3000
 #define MDNS_MAX_RESULTS 10
 
-// Task management variables for continuous discovery
-static TaskHandle_t s_discovery_task = NULL;
+// Discovery runtime state
 static SemaphoreHandle_t s_device_mutex = NULL;
 static discovered_device_t s_devices[MAX_DISCOVERED_DEVICES];
 static size_t s_device_count = 0;
 static volatile bool s_task_running = false;
+static bool s_runtime_initialized = false;
+static time_t s_last_query_time = 0;
+static time_t s_last_cleanup_time = 0;
+static time_t s_last_heartbeat_time = 0;
 
 // Helper function to remove stale devices (older than 2 minutes)
 static void remove_stale_devices(void) {
@@ -141,79 +142,75 @@ static void process_mdns_results(mdns_result_t *results) {
     ESP_LOGD(TAG, "=== RESULT PROCESSING COMPLETE ===");
 }
 
-// Main discovery task function for continuous mDNS discovery
-static void mdns_discovery_task(void *pvParameters) {
-    ESP_LOGI(TAG, "mDNS discovery task started");
-
-    // Timing variables
-    time_t last_query_time = 0;
-    time_t last_cleanup_time = time(NULL);
-    time_t last_heartbeat = time(NULL);
-    const int QUERY_INTERVAL = 10;  // Send query every 10 seconds
-    const int CLEANUP_INTERVAL = 30; // Clean up stale devices every 30 seconds
-    const int HEARTBEAT_INTERVAL = 30; // Heartbeat every 30 seconds
-
-    ESP_LOGI(TAG, "Starting discovery loop (query every %ds, cleanup every %ds)",
-            QUERY_INTERVAL, CLEANUP_INTERVAL);
-
-    // Main task loop
-    while (s_task_running) {
-        time_t current_time = time(NULL);
-
-        // Heartbeat log
-        if ((current_time - last_heartbeat) >= HEARTBEAT_INTERVAL) {
-            ESP_LOGI(TAG, "[Heartbeat] Discovery active, %d device(s) found", s_device_count);
-            last_heartbeat = current_time;
-        }
-
-        // Send mDNS query every 10 seconds
-        if ((current_time - last_query_time) >= QUERY_INTERVAL) {
-            ESP_LOGD(TAG, "Querying for _scream._udp services...");
-
-            // Perform service discovery query for _scream._udp
-            mdns_result_t *results = NULL;
-            esp_err_t err = mdns_query_ptr("_scream", "_udp",
-                                          MDNS_QUERY_TIMEOUT_MS, MDNS_MAX_RESULTS, &results);
-
-            if (err == ESP_OK) {
-                if (results) {
-                    int result_count = 0;
-                    mdns_result_t *r = results;
-                    while (r) {
-                        result_count++;
-                        r = r->next;
-                    }
-                    ESP_LOGI(TAG, "Found %d _scream._udp service(s)", result_count);
-                    process_mdns_results(results);
-                    mdns_query_results_free(results);
-                } else {
-                    ESP_LOGD(TAG, "No _scream._udp services found");
-                }
-            } else {
-                ESP_LOGW(TAG, "Query failed: %s", esp_err_to_name(err));
-            }
-
-            last_query_time = current_time;
-        }
-
-        // Periodic cleanup every 30 seconds
-        if ((current_time - last_cleanup_time) >= CLEANUP_INTERVAL) {
-            ESP_LOGD(TAG, "Performing stale device cleanup");
-            if (xSemaphoreTake(s_device_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-                remove_stale_devices();
-                xSemaphoreGive(s_device_mutex);
-            }
-            last_cleanup_time = current_time;
-        }
-
-        // Sleep for 1 second between iterations
-        vTaskDelay(pdMS_TO_TICKS(1000));
+// Periodic discovery worker
+void mdns_discovery_tick(void) {
+    if (!s_task_running) {
+        return;
     }
 
-    // Cleanup on exit
-    ESP_LOGI(TAG, "mDNS discovery task stopping");
-    s_discovery_task = NULL;
-    vTaskDelete(NULL);
+    time_t current_time = time(NULL);
+    if (current_time == ((time_t)-1)) {
+        return;
+    }
+
+    const int QUERY_INTERVAL = 10;      // Send query every 10 seconds
+    const int CLEANUP_INTERVAL = 30;    // Clean up stale devices every 30 seconds
+    const int HEARTBEAT_INTERVAL = 30;  // Heartbeat every 30 seconds
+
+    if (!s_runtime_initialized) {
+        ESP_LOGI(TAG, "Starting discovery loop (query every %ds, cleanup every %ds)",
+                 QUERY_INTERVAL, CLEANUP_INTERVAL);
+        s_last_query_time = 0;
+        s_last_cleanup_time = current_time;
+        s_last_heartbeat_time = current_time;
+        s_runtime_initialized = true;
+    }
+
+    // Heartbeat log
+    if ((current_time - s_last_heartbeat_time) >= HEARTBEAT_INTERVAL) {
+        ESP_LOGI(TAG, "[Heartbeat] Discovery active, %d device(s) found", (int)s_device_count);
+        s_last_heartbeat_time = current_time;
+    }
+
+    // Send mDNS query at the configured interval
+    if ((current_time - s_last_query_time) >= QUERY_INTERVAL) {
+        ESP_LOGD(TAG, "Querying for _scream._udp services...");
+
+        // Perform service discovery query for _scream._udp
+        mdns_result_t *results = NULL;
+        esp_err_t err = mdns_query_ptr("_scream", "_udp",
+                                      MDNS_QUERY_TIMEOUT_MS, MDNS_MAX_RESULTS, &results);
+
+        if (err == ESP_OK) {
+            if (results) {
+                int result_count = 0;
+                mdns_result_t *r = results;
+                while (r) {
+                    result_count++;
+                    r = r->next;
+                }
+                ESP_LOGI(TAG, "Found %d _scream._udp service(s)", result_count);
+                process_mdns_results(results);
+                mdns_query_results_free(results);
+            } else {
+                ESP_LOGD(TAG, "No _scream._udp services found");
+            }
+        } else {
+            ESP_LOGW(TAG, "Query failed: %s", esp_err_to_name(err));
+        }
+
+        s_last_query_time = current_time;
+    }
+
+    // Periodic cleanup
+    if ((current_time - s_last_cleanup_time) >= CLEANUP_INTERVAL) {
+        ESP_LOGD(TAG, "Performing stale device cleanup");
+        if (xSemaphoreTake(s_device_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+            remove_stale_devices();
+            xSemaphoreGive(s_device_mutex);
+        }
+        s_last_cleanup_time = current_time;
+    }
 }
 
 /**
@@ -248,23 +245,10 @@ esp_err_t mdns_discovery_start(void) {
     // Set task running flag
     s_task_running = true;
 
-    // Create the discovery task
-    BaseType_t ret = xTaskCreate(mdns_discovery_task,
-                                  "mdns_discovery",
-                                  6144,
-                                  NULL,
-                                  5,
-                                  &s_discovery_task);
+    // Initialise runtime state so the next tick performs work immediately
+    s_runtime_initialized = false;
 
-    if (ret != pdPASS) {
-        ESP_LOGE(TAG, "Failed to create discovery task");
-        vSemaphoreDelete(s_device_mutex);
-        s_device_mutex = NULL;
-        s_task_running = false;
-        return ESP_FAIL;
-    }
-
-    ESP_LOGI(TAG, "mDNS discovery task started successfully");
+    ESP_LOGI(TAG, "mDNS discovery worker enabled");
     return ESP_OK;
 }
 
@@ -279,19 +263,9 @@ esp_err_t mdns_discovery_stop(void) {
         return ESP_OK;
     }
 
-    // Set flag to stop task
+    // Set flag to stop worker
     s_task_running = false;
-
-    // Wait for task to exit
-    if (s_discovery_task != NULL) {
-        vTaskDelay(pdMS_TO_TICKS(2000)); // Give task time to exit cleanly
-
-        // If task still exists, delete it
-        if (s_discovery_task != NULL) {
-            vTaskDelete(s_discovery_task);
-            s_discovery_task = NULL;
-        }
-    }
+    s_runtime_initialized = false;
 
     // Delete the device mutex
     if (s_device_mutex != NULL) {

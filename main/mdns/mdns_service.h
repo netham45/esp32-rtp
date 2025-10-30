@@ -69,6 +69,15 @@ bool mdns_service_is_initialized(void);
  */
 bool mdns_service_is_advertising(void);
 
+/**
+ * @brief Run pending periodic TXT record updates.
+ *
+ * Invoking this function replaces the previous background task that refreshed
+ * TXT records. Call it regularly from a cooperative loop to keep the
+ * advertisement metadata fresh.
+ */
+void mdns_service_txt_update_tick(void);
+
 #ifdef __cplusplus
 }
 #endif

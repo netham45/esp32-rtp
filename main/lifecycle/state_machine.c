@@ -8,6 +8,9 @@
 #include "../global.h"
 #include "../config/config_manager.h"
 #include "wifi_manager.h"
+#include "../mdns/mdns_discovery.h"
+#include "../mdns/mdns_service.h"
+#include "bq25895_integration.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
@@ -33,6 +36,7 @@ static void handle_state_mode_receiver_spdif(lifecycle_event_t event);
 static void handle_state_sleeping(lifecycle_event_t event);
 static void handle_state_error(lifecycle_event_t event);
 static void handle_state_pairing(lifecycle_event_t event);
+static void lifecycle_run_background_tasks(void);
 
 // Forward declarations for state transition helpers
 static void set_state(lifecycle_state_t new_state);
@@ -389,18 +393,24 @@ static void handle_state_pairing(lifecycle_event_t event) {
     }
 }
 
+static void lifecycle_run_background_tasks(void) {
+    mdns_discovery_tick();
+    mdns_service_txt_update_tick();
+    bq25895_integration_tick();
+}
+
 /**
  * Main lifecycle manager task
  */
 static void lifecycle_manager_task(void *pvParameters) {
     ESP_LOGI(TAG, "Lifecycle manager task started.");
-    
+
     // Initial state transition
     set_state(LIFECYCLE_STATE_HW_INIT);
 
     while (1) {
         lifecycle_event_t event;
-        if (xQueueReceive(s_lifecycle_event_queue, &event, portMAX_DELAY) == pdPASS) {
+        if (xQueueReceive(s_lifecycle_event_queue, &event, pdMS_TO_TICKS(50)) == pdPASS) {
             ESP_LOGI(TAG, "LIFECYCLE: Received event %d in state %d", event, s_current_state);
             switch (s_current_state) {
                 case LIFECYCLE_STATE_INITIALIZING:
@@ -438,6 +448,8 @@ static void lifecycle_manager_task(void *pvParameters) {
                     break;
             }
         }
+
+        lifecycle_run_background_tasks();
     }
 }
 

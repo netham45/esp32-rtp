@@ -39,28 +39,34 @@ static const bq25895_charge_params_t default_charge_params = {
 
 // I2C master initialization is now handled by the BQ25895 driver
 
-// Task to periodically reset the watchdog timer
-static void watchdog_reset_task(void *pvParameters)
+static TickType_t s_last_watchdog_reset = 0;
+static bool s_watchdog_tick_enabled = false;
+static const TickType_t WATCHDOG_RESET_INTERVAL_TICKS = pdMS_TO_TICKS(30000);
+
+void bq25895_integration_tick(void)
 {
-    ESP_LOGI(TAG, "Watchdog reset task started");
-    
-    while (1) {
-        // Reset the watchdog timer every 30 seconds
-        // The BQ25895 watchdog timer is typically 40 seconds
-        vTaskDelay(pdMS_TO_TICKS(30000));
-        
-        esp_err_t ret = bq25895_reset_watchdog();
-        if (ret != ESP_OK) {
-            ESP_LOGW(TAG, "Failed to reset watchdog timer: %s", esp_err_to_name(ret));
-        } else {
-            ESP_LOGD(TAG, "Watchdog timer reset successfully");
-        }
-        
-        // Also ensure OTG mode is still enabled
-        ret = bq25895_enable_otg(true);
-        if (ret != ESP_OK) {
-            ESP_LOGW(TAG, "Failed to re-enable OTG mode: %s", esp_err_to_name(ret));
-        }
+    if (!s_watchdog_tick_enabled) {
+        return;
+    }
+
+    TickType_t now = xTaskGetTickCount();
+    if ((now - s_last_watchdog_reset) < WATCHDOG_RESET_INTERVAL_TICKS) {
+        return;
+    }
+
+    s_last_watchdog_reset = now;
+
+    esp_err_t ret = bq25895_reset_watchdog();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to reset watchdog timer: %s", esp_err_to_name(ret));
+    } else {
+        ESP_LOGD(TAG, "Watchdog timer reset successfully");
+    }
+
+    // Also ensure OTG mode is still enabled
+    ret = bq25895_enable_otg(true);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to re-enable OTG mode: %s", esp_err_to_name(ret));
     }
 }
 
@@ -129,29 +135,9 @@ esp_err_t bq25895_integration_init(void)
     }
     ESP_LOGI(TAG, "BQ25895 watchdog timer reset");
     
-    ESP_LOGI(TAG, "Watchdog reset task started");
-    
-    // Add a small delay before starting the watchdog task to ensure initialization is complete
-    vTaskDelay(pdMS_TO_TICKS(100));
-    
-    // Create a periodic task to reset the watchdog timer
-    static TaskHandle_t watchdog_reset_task_handle = NULL;
-    if (watchdog_reset_task_handle == NULL) {
-        BaseType_t task_ret = xTaskCreatePinnedToCore(
-            watchdog_reset_task,
-            "watchdog_reset",
-            2048,
-            NULL,
-            1,  // Low priority
-            &watchdog_reset_task_handle,
-            0   // Core 0
-        );
-        if (task_ret != pdPASS) {
-            ESP_LOGE(TAG, "Failed to create watchdog reset task");
-            return ESP_FAIL;
-        }
-        ESP_LOGI(TAG, "Watchdog reset task created");
-    }
+    s_watchdog_tick_enabled = true;
+    s_last_watchdog_reset = xTaskGetTickCount();
+    ESP_LOGI(TAG, "Watchdog tick handler enabled");
 
     // Enable ADC conversions for battery monitoring
     // Add delay before writing to ensure driver is ready

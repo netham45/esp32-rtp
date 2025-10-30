@@ -43,6 +43,15 @@ esp_err_t mdns_discovery_start(void);
 esp_err_t mdns_discovery_stop(void);
 
 /**
+ * @brief Run a single iteration of the mDNS discovery worker.
+ *
+ * This function performs any pending discovery work when discovery has been
+ * started. It is inexpensive to call frequently and is intended to be invoked
+ * from a cooperative background loop rather than a dedicated FreeRTOS task.
+ */
+void mdns_discovery_tick(void);
+
+/**
  * @brief Get the list of discovered devices
  *
  * Returns a snapshot of the currently discovered devices. Automatically

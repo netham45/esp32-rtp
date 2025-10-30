@@ -68,4 +68,12 @@ esp_err_t bq25895_integration_read_register(uint8_t reg, uint8_t *value);
  */
 esp_err_t bq25895_integration_write_register(uint8_t reg, uint8_t value);
 
+/**
+ * @brief Run periodic maintenance actions for the BQ25895 integration.
+ *
+ * Call this cooperatively to service the charger watchdog without allocating a
+ * dedicated FreeRTOS task.
+ */
+void bq25895_integration_tick(void);
+
 #endif // BQ25895_INTEGRATION_H

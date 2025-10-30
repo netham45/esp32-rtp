@@ -9,6 +9,7 @@
 #include "freertos/task.h"
 #include "lifecycle_manager.h"
 #include "bq25895_integration.h"
+#include "esp_timer.h"
 
 static const char *TAG = "mdns_service";
 
@@ -29,9 +30,10 @@ static bool s_advertisement_enabled = false;
 static char s_battery_level_str[8];
 static char s_mac_str[18];  // xx:xx:xx:xx:xx:xx + null terminator
 
-// Task for periodic TXT record updates
-static TaskHandle_t s_txt_update_task = NULL;
+// Periodic TXT record update state
 static volatile bool s_txt_task_running = false;
+static int64_t s_last_txt_update_time_us = 0;
+static const int64_t TXT_UPDATE_INTERVAL_US = 30LL * 1000 * 1000; // 30 seconds
 
 // Helper function to calculate battery percentage from voltage
 // Assuming Li-Ion battery: 4.2V = 100%, 3.0V = 0%
@@ -175,25 +177,21 @@ static esp_err_t update_txt_records(void) {
     return err;
 }
 
-/**
- * @brief Task for periodic TXT record updates
- */
-static void txt_update_task(void *pvParameters) {
-    ESP_LOGI(TAG, "TXT record update task started");
-    const int UPDATE_INTERVAL = 30; // Update every 30 seconds
-
-    while (s_txt_task_running) {
-        vTaskDelay(pdMS_TO_TICKS(UPDATE_INTERVAL * 1000));
-
-        if (s_txt_task_running && s_advertisement_enabled) {
-            ESP_LOGD(TAG, "Periodic TXT record update");
-            update_txt_records();
-        }
+void mdns_service_txt_update_tick(void) {
+    if (!s_txt_task_running || !s_advertisement_enabled) {
+        return;
     }
 
-    ESP_LOGI(TAG, "TXT record update task stopped");
-    s_txt_update_task = NULL;
-    vTaskDelete(NULL);
+    int64_t now = esp_timer_get_time();
+    if (now < 0) {
+        return;
+    }
+
+    if ((now - s_last_txt_update_time_us) >= TXT_UPDATE_INTERVAL_US) {
+        ESP_LOGD(TAG, "Periodic TXT record update");
+        update_txt_records();
+        s_last_txt_update_time_us = now;
+    }
 }
 
 /**
@@ -339,17 +337,10 @@ void mdns_service_start(void) {
     s_advertisement_enabled = true;
     ESP_LOGI(TAG, "mDNS service advertisement started successfully");
 
-    // Start TXT record update task
-    if (s_txt_update_task == NULL) {
-        s_txt_task_running = true;
-        BaseType_t ret = xTaskCreate(txt_update_task, "mdns_txt_update", 4096, NULL, 5, &s_txt_update_task);
-        if (ret != pdPASS) {
-            ESP_LOGE(TAG, "Failed to create TXT update task");
-            s_txt_task_running = false;
-        } else {
-            ESP_LOGI(TAG, "TXT record update task started");
-        }
-    }
+    // Enable periodic TXT record updates
+    s_txt_task_running = true;
+    s_last_txt_update_time_us = esp_timer_get_time();
+    ESP_LOGI(TAG, "TXT record update worker enabled");
 }
 
 /**
@@ -358,15 +349,8 @@ void mdns_service_start(void) {
 void mdns_service_stop(void) {
     ESP_LOGI(TAG, "Stopping mDNS service advertisement");
 
-    // Stop TXT update task
-    if (s_txt_update_task != NULL) {
-        s_txt_task_running = false;
-        vTaskDelay(pdMS_TO_TICKS(100)); // Give task time to exit
-        if (s_txt_update_task != NULL) {
-            vTaskDelete(s_txt_update_task);
-            s_txt_update_task = NULL;
-        }
-    }
+    // Stop TXT update worker
+    s_txt_task_running = false;
 
     // Remove service advertisement
     if (s_advertisement_enabled) {
