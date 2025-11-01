@@ -6,23 +6,21 @@
 #include "esp_system.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
 #include "freertos/semphr.h"
 #include <string.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <sys/socket.h>
-#include <sys/select.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <unistd.h>
 
 // Module state
 static struct {
     int socket;
-    TaskHandle_t handler_task;
-    TaskHandle_t cleanup_task;
     bool is_running;
     uint32_t timeout_seconds;
+    time_t last_cleanup_check;
     
     // Announcement tracking
     sap_announcement_t announcements[SAP_MAX_ANNOUNCEMENTS];
@@ -30,20 +28,31 @@ static struct {
     SemaphoreHandle_t mutex;
 } s_sap_state = {
     .socket = -1,
-    .handler_task = NULL,
-    .cleanup_task = NULL,
     .is_running = false,
     .timeout_seconds = SAP_ANNOUNCEMENT_TIMEOUT_SEC,
+    .last_cleanup_check = 0,
     .announcement_count = 0,
     .mutex = NULL
 };
 
 // Forward declarations
-static void sap_handler_task(void *pvParameters);
-static void sap_cleanup_task(void *pvParameters);
+static void sap_process_incoming_packets(void);
+static void sap_maybe_cleanup_announcements(void);
 static bool parse_sdp_and_get_info(const char *sdp, sap_announcement_t *announcement);
 static void update_or_add_announcement(sap_announcement_t *new_announcement);
 static void cleanup_expired_announcements(void);
+
+// Bound how much work the lifecycle tick spends on SAP per iteration
+#define SAP_MAX_PACKETS_PER_TICK 4
+
+static void sap_listener_reset_runtime_state(void) {
+    s_sap_state.socket = -1;
+    s_sap_state.is_running = false;
+    s_sap_state.timeout_seconds = SAP_ANNOUNCEMENT_TIMEOUT_SEC;
+    s_sap_state.last_cleanup_check = 0;
+    s_sap_state.announcement_count = 0;
+    memset(s_sap_state.announcements, 0, sizeof(s_sap_state.announcements));
+}
 
 esp_err_t sap_listener_init(void) {
 
@@ -55,9 +64,8 @@ esp_err_t sap_listener_init(void) {
         return ESP_FAIL;
     }
     
-    // Clear announcement history
-    memset(s_sap_state.announcements, 0, sizeof(s_sap_state.announcements));
-    s_sap_state.announcement_count = 0;
+    // Reset runtime state
+    sap_listener_reset_runtime_state();
     
     return ESP_OK;
 }
@@ -66,6 +74,11 @@ esp_err_t sap_listener_start(void) {
     if (s_sap_state.is_running) {
         ESP_LOGW(TAG, "SAP listener is already running");
         return ESP_OK;
+    }
+
+    if (s_sap_state.mutex == NULL) {
+        ESP_LOGE(TAG, "SAP listener not initialized");
+        return ESP_FAIL;
     }
     
     ESP_LOGI(TAG, "Starting SAP listener");
@@ -80,7 +93,24 @@ esp_err_t sap_listener_start(void) {
     
     // Set socket options
     int reuse = 1;
-    setsockopt(s_sap_state.socket, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+    if (setsockopt(s_sap_state.socket, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0) {
+        ESP_LOGW(TAG, "Failed to set SO_REUSEADDR on SAP socket: errno %d", errno);
+    }
+
+    // Ensure non-blocking operation for tick-based processing
+    int current_flags = fcntl(s_sap_state.socket, F_GETFL, 0);
+    if (current_flags < 0) {
+        ESP_LOGE(TAG, "Failed to read SAP socket flags: errno %d", errno);
+        close(s_sap_state.socket);
+        s_sap_state.socket = -1;
+        return ESP_FAIL;
+    }
+    if (fcntl(s_sap_state.socket, F_SETFL, current_flags | O_NONBLOCK) < 0) {
+        ESP_LOGE(TAG, "Failed to set SAP socket non-blocking: errno %d", errno);
+        close(s_sap_state.socket);
+        s_sap_state.socket = -1;
+        return ESP_FAIL;
+    }
     
     // Bind to SAP port
     memset(&sap_addr, 0, sizeof(sap_addr));
@@ -108,46 +138,9 @@ esp_err_t sap_listener_start(void) {
     }
     
     ESP_LOGI(TAG, "SAP listener started on port %d, multicast %s", SAP_PORT, SAP_MULTICAST_ADDR);
-    
-    // Create handler task
-    BaseType_t ret = xTaskCreatePinnedToCore(
-        sap_handler_task, 
-        "sap_handler", 
-        4096,
-        NULL, 
-        5, 
-        &s_sap_state.handler_task, 
-        0
-    );
-    
-    if (ret != pdPASS) {
-        ESP_LOGE(TAG, "Failed to create SAP handler task");
-        close(s_sap_state.socket);
-        s_sap_state.socket = -1;
-        return ESP_FAIL;
-    }
-    
-    // Create cleanup task
-    ret = xTaskCreatePinnedToCore(
-        sap_cleanup_task,
-        "sap_cleanup",
-        4096,
-        NULL,
-        5,
-        &s_sap_state.cleanup_task,
-        0
-    );
-    
-    if (ret != pdPASS) {
-        ESP_LOGE(TAG, "Failed to create SAP cleanup task");
-        vTaskDelete(s_sap_state.handler_task);
-        s_sap_state.handler_task = NULL;
-        close(s_sap_state.socket);
-        s_sap_state.socket = -1;
-        return ESP_FAIL;
-    }
-    
+
     s_sap_state.is_running = true;
+    s_sap_state.last_cleanup_check = time(NULL);
     return ESP_OK;
 }
 
@@ -160,22 +153,13 @@ esp_err_t sap_listener_stop(void) {
     ESP_LOGI(TAG, "Stopping SAP listener");
     s_sap_state.is_running = false;
     
-    // Stop tasks
-    if (s_sap_state.handler_task) {
-        vTaskDelete(s_sap_state.handler_task);
-        s_sap_state.handler_task = NULL;
-    }
-    
-    if (s_sap_state.cleanup_task) {
-        vTaskDelete(s_sap_state.cleanup_task);
-        s_sap_state.cleanup_task = NULL;
-    }
-    
     // Close socket
     if (s_sap_state.socket >= 0) {
         close(s_sap_state.socket);
         s_sap_state.socket = -1;
     }
+
+    s_sap_state.last_cleanup_check = 0;
     
     ESP_LOGI(TAG, "SAP listener stopped");
     return ESP_OK;
@@ -195,9 +179,9 @@ esp_err_t sap_listener_deinit(void) {
         s_sap_state.mutex = NULL;
     }
     
-    // Clear state
-    memset(&s_sap_state, 0, sizeof(s_sap_state));
-    s_sap_state.socket = -1;
+    // Clear state while preserving initialization defaults
+    sap_listener_reset_runtime_state();
+    s_sap_state.mutex = NULL;
     
     return ESP_OK;
 }
@@ -334,40 +318,36 @@ size_t sap_listener_get_active_count(void) {
 
 // Internal functions
 
-static void sap_handler_task(void *pvParameters) {
+static void sap_process_incoming_packets(void) {
+    if (!s_sap_state.is_running || s_sap_state.socket < 0) {
+        return;
+    }
+
     char rx_buffer[SAP_BUFFER_SIZE];
     struct sockaddr_in source_addr;
     socklen_t socklen = sizeof(source_addr);
-    fd_set read_fds;
-    struct timeval tv;
 
-    ESP_LOGI(TAG, "SAP handler task started");
+    for (int processed = 0; processed < SAP_MAX_PACKETS_PER_TICK; ++processed) {
+        socklen = sizeof(source_addr);
+        int len = recvfrom(s_sap_state.socket,
+                           rx_buffer,
+                           sizeof(rx_buffer) - 1,
+#ifdef MSG_DONTWAIT
+                           MSG_DONTWAIT,
+#else
+                           0,
+#endif
+                           (struct sockaddr *)&source_addr,
+                           &socklen);
 
-    while (s_sap_state.is_running) {
-        // Setup select with timeout
-        FD_ZERO(&read_fds);
-        FD_SET(s_sap_state.socket, &read_fds);
-        tv.tv_sec = 0;
-        tv.tv_usec = 100000;  // 100ms timeout
-
-        int select_result = select(s_sap_state.socket + 1, &read_fds, NULL, NULL, &tv);
-        
-        if (select_result < 0) {
-            ESP_LOGE(TAG, "SAP select failed: errno %d", errno);
-            vTaskDelay(pdMS_TO_TICKS(10));
-            continue;
-        } else if (select_result == 0) {
-            // Timeout, no data available
-            continue;
-        }
-
-        // Data is available, read it
-        int len = recvfrom(s_sap_state.socket, rx_buffer, sizeof(rx_buffer) - 1, 0,
-                          (struct sockaddr *)&source_addr, &socklen);
         if (len < 0) {
             if (errno != EAGAIN && errno != EWOULDBLOCK) {
                 ESP_LOGE(TAG, "SAP recvfrom failed: errno %d", errno);
             }
+            break;
+        }
+
+        if (len == 0) {
             continue;
         }
 
@@ -486,24 +466,32 @@ static void sap_handler_task(void *pvParameters) {
             ESP_LOGW(TAG, "Failed to parse SDP content");
         }
     }
-    
-    ESP_LOGI(TAG, "SAP handler task exiting");
-    vTaskDelete(NULL);
 }
 
-static void sap_cleanup_task(void *pvParameters) {
-    ESP_LOGI(TAG, "SAP cleanup task started");
-    
-    while (s_sap_state.is_running) {
-        // Wait for cleanup interval
-        vTaskDelay(pdMS_TO_TICKS(SAP_CLEANUP_INTERVAL_SEC * 1000));
-        
-        // Clean up expired announcements
+static void sap_maybe_cleanup_announcements(void) {
+    if (!s_sap_state.is_running) {
+        return;
+    }
+
+    time_t now = time(NULL);
+    if (now == (time_t)-1) {
+        return;
+    }
+
+    if (s_sap_state.last_cleanup_check == 0 ||
+        (now - s_sap_state.last_cleanup_check) >= SAP_CLEANUP_INTERVAL_SEC) {
+        s_sap_state.last_cleanup_check = now;
         cleanup_expired_announcements();
     }
-    
-    ESP_LOGI(TAG, "SAP cleanup task exiting");
-    vTaskDelete(NULL);
+}
+
+void sap_listener_tick(void) {
+    if (!s_sap_state.is_running || s_sap_state.socket < 0) {
+        return;
+    }
+
+    sap_process_incoming_packets();
+    sap_maybe_cleanup_announcements();
 }
 
 /**

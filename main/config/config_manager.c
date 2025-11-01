@@ -6,7 +6,6 @@
 #include "nvs_flash.h"
 #include "nvs.h"
 #include <string.h>
-#include "visualizer_task.h"
 
 // Store the active configuration
 static app_config_t s_app_config;

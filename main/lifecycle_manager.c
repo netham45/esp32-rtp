@@ -22,7 +22,6 @@
 // Lifecycle context (replaces individual static variables)
 static lifecycle_context_t s_lifecycle_context = {
     .network_activity_event_group = NULL,
-    .network_monitor_task_handle = NULL,
     .packet_counter = 0,
     .monitoring_active = false,
     .last_packet_time = 0,

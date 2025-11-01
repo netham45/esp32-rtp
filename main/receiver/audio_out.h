@@ -19,6 +19,7 @@ bool is_playing();
 // Audio data functions
 void audio_write(uint8_t* data);
 void audio_direct_write(uint8_t* data);
+void audio_out_tick(void);
 
 // Volume control
 esp_err_t audio_out_update_volume(void);

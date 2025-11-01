@@ -9,7 +9,6 @@
 #include "wifi_manager.h"
 #include <string.h>
 #include <stdlib.h>
-#include "visualizer_task.h"
 
 static const char *TAG = "route_helpers";
 

@@ -6,7 +6,6 @@
 #include "../receiver/network_in.h"
 #include "../receiver/sap_listener.h"
 #include "../sender/network_out.h"
-#include "visualizer_task.h"
 #include "../config/config_manager.h"
 #include "esp_log.h"
 

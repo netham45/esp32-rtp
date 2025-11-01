@@ -39,13 +39,13 @@ typedef struct {
 esp_err_t sap_listener_init(void);
 
 /**
- * @brief Start the SAP listener task
+ * @brief Start the SAP listener socket processing
  * @return ESP_OK on success, error code otherwise
  */
 esp_err_t sap_listener_start(void);
 
 /**
- * @brief Stop the SAP listener task
+ * @brief Stop the SAP listener
  * @return ESP_OK on success, error code otherwise
  */
 esp_err_t sap_listener_stop(void);
@@ -107,5 +107,10 @@ size_t sap_listener_get_active_count(void);
  * Should be called when SAP stream name configuration changes
  */
 void sap_listener_check_stream_config(void);
+
+/**
+ * @brief Service SAP listener I/O and cleanup from lifecycle tick loop
+ */
+void sap_listener_tick(void);
 
 #endif // SAP_LISTENER_H
