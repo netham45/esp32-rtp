@@ -24,6 +24,7 @@
 #include "esp_timer.h"    // For timestamp generation
 #include "spdif_in.h"
 #include "usb_in.h"
+#include "wav_streamer.h"
 #include "config/config_manager.h"  // For device_mode_t enum
 
 // RTP header structure (12 bytes)
@@ -51,7 +52,10 @@ typedef struct __attribute__((packed)) {
 #define RTP_VERSION          2
 #define RTP_PAYLOAD_TYPE     127  // Dynamic payload type for L16/48000/2
 #define RTP_HEADER_SIZE      sizeof(rtp_header_t)  // Use struct size for consistency
-#define RTP_TIMESTAMP_INC    288 // Samples per packet at 48kHz (1152 bytes / 4 bytes per sample)
+// RTP timestamp increments by samples PER CHANNEL for L16 stereo
+// 1152 bytes / 4 bytes per stereo sample pair = 288 stereo samples
+// Each channel gets 288 samples, so timestamp increments by 288
+#define RTP_TIMESTAMP_INC    288 // Samples per channel per packet at 48kHz
 
 // SAP constants
 #define SAP_MULTICAST_ADDR   CONFIG_SAP_MULTICAST_ADDR
@@ -66,10 +70,15 @@ typedef struct __attribute__((packed)) {
 #define CHUNK_SIZE PCM_CHUNK_SIZE
 #define PACKET_SIZE (CHUNK_SIZE + HEADER_SIZE)
 
+#if defined(CONFIG_USB_IN_CHUNK_SIZE)
+_Static_assert(CONFIG_USB_IN_CHUNK_SIZE == PCM_CHUNK_SIZE,
+               "USB PCM chunk size must match RTP chunk size");
+#endif
+
 // Socket options
 #define UDP_TX_BUFFER_SIZE (PCM_CHUNK_SIZE * 4)
-#define UDP_SEND_TIMEOUT_MS 10
-#define MAX_SEND_RETRIES 1
+#define UDP_SEND_TIMEOUT_MS 100
+#define MAX_SEND_RETRIES 3
 
 // State variables
 static bool s_is_sender_initialized = false;
@@ -113,16 +122,14 @@ static void build_rtp_packet(uint8_t *packet, const uint8_t *audio_data, size_t 
     header->timestamp = htonl(s_rtp_timestamp);  // Convert to network byte order
     header->ssrc = htonl(s_rtp_ssrc);  // Convert to network byte order
     
-    // Copy audio data to packet after header
-    memcpy(packet + sizeof(rtp_header_t), audio_data, audio_len);
-    
-    // Convert audio samples to network byte order (big endian) - REQUIRED for L16 per RFC 3551
-    int16_t *samples = (int16_t *)(packet + sizeof(rtp_header_t));
+    uint8_t *payload_ptr = packet + sizeof(rtp_header_t);
+    const int16_t *src_samples = (const int16_t *)audio_data;
+    int16_t *dst_samples = (int16_t *)payload_ptr;
     size_t sample_count = audio_len / sizeof(int16_t);
     
+    // Convert samples to network byte order (big endian) - REQUIRED for L16 per RFC 3551
     for (size_t i = 0; i < sample_count; i++) {
-        // Use htons for proper 16-bit network byte order conversion
-        samples[i] = htons(samples[i]);
+        dst_samples[i] = htons(src_samples[i]);
     }
     
     // Update timestamp for next packet (288 samples per packet)
@@ -349,6 +356,16 @@ esp_err_t rtp_sender_init(void)
     }
 
     s_is_sender_initialized = true;
+
+    uint32_t sample_rate = lifecycle_get_sample_rate();
+    uint8_t bit_depth = lifecycle_get_bit_depth();
+    uint8_t channels = 2;
+
+    esp_err_t wav_err = wav_streamer_init(sample_rate, bit_depth, channels);
+    if (wav_err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to initialize WAV streamer: 0x%x", wav_err);
+    }
+
     return ESP_OK;
 }
 
@@ -370,7 +387,7 @@ esp_err_t rtp_sender_start(void)
     s_next_sap_announce_us = 0;
 
     // Create the sender task
-    xTaskCreatePinnedToCore(rtp_sender_task, "rtp_sender_task", 8192, NULL, 5, &s_sender_task_handle, 1);
+    xTaskCreatePinnedToCore(rtp_sender_task, "rtp_sender_task", 8192, NULL, 7, &s_sender_task_handle, 1);
 
     ESP_LOGI(TAG, "SAP announcements scheduled via lifecycle tick");
     
@@ -415,6 +432,7 @@ esp_err_t rtp_sender_stop(void)
     }
 
     s_next_sap_announce_us = 0;
+    wav_streamer_deinit();
 
     return ESP_OK;
 }
@@ -577,12 +595,17 @@ static void rtp_sender_task(void *arg)
     static unsigned char rtp_packet[PACKET_SIZE];
     char audio_buffer[CHUNK_SIZE];
     size_t bytes_in_buffer = 0;
+    struct {
+        size_t len;
+        size_t offset;
+        uint8_t data[CHUNK_SIZE];
+    } ring_stash = {0};
 
     // For pacing the sender to match the audio rate
-    TickType_t xLastWakeTime;
-    // 1152 bytes per chunk / (48000 samples/sec * 2 channels * 2 bytes/sample) = 6ms per chunk
-    const TickType_t xFrequency = pdMS_TO_TICKS(3); 
-    xLastWakeTime = xTaskGetTickCount();
+    // 1152 bytes = 288 stereo samples = 288/48000 = 6ms exactly
+    // Using esp_timer for more precise timing to avoid drift
+    int64_t next_send_time_us = esp_timer_get_time();
+    const int64_t send_interval_us = 6000; // 6ms in microseconds
 
     RingbufHandle_t pcm_out_buffer = NULL;
 
@@ -606,41 +629,109 @@ static void rtp_sender_task(void *arg)
         if (s_is_muted) {
             vTaskDelay(pdMS_TO_TICKS(100));
             bytes_in_buffer = 0; // Reset buffer when muted
+            ring_stash.len = 0;
+            ring_stash.offset = 0;
             continue;
         }
 
         // We need to fill the buffer completely before sending
-        if (bytes_in_buffer < CHUNK_SIZE) {
-            size_t bytes_to_read = CHUNK_SIZE - bytes_in_buffer;
-            int bytes_read = 0;
+        bool ringbuf_empty = false;
+        while (bytes_in_buffer < CHUNK_SIZE) {
+            size_t remaining = CHUNK_SIZE - bytes_in_buffer;
 
-            size_t item_size;
-            // Try to receive up to bytes_to_read from the ring buffer
+            if (ring_stash.len > ring_stash.offset) {
+                size_t available = ring_stash.len - ring_stash.offset;
+                size_t to_copy = available < remaining ? available : remaining;
+                memcpy((uint8_t *)audio_buffer + bytes_in_buffer,
+                       ring_stash.data + ring_stash.offset, to_copy);
+                ring_stash.offset += to_copy;
+                bytes_in_buffer += to_copy;
+
+                if (ring_stash.offset == ring_stash.len) {
+                    ring_stash.len = 0;
+                    ring_stash.offset = 0;
+                }
+
+                continue;
+            }
+
+            size_t item_size = 0;
+            // Try to receive up to a full chunk from the ring buffer
+            // Increased timeout to avoid missing data
             uint8_t *item = (uint8_t *)xRingbufferReceiveUpTo(
                 pcm_out_buffer,  // Ring buffer populated by either usb_in or spdif_in
                 &item_size,
-                pdMS_TO_TICKS(1),
-                bytes_to_read
+                pdMS_TO_TICKS(10),  // Allow entire USB chunk (≈6ms) to arrive
+                CHUNK_SIZE
             );
-            if (item != NULL) {
-                memcpy((uint8_t*)audio_buffer + bytes_in_buffer, item, item_size);
-                bytes_read = item_size;
-                vRingbufferReturnItem(pcm_out_buffer, (void *)item);
-            } else {
-                bytes_read = 0;
+            if (item == NULL) {
+                // No data yet; re-evaluate and let the pacing logic decide
+                vTaskDelay(pdMS_TO_TICKS(1));
+                ringbuf_empty = true;
+                next_send_time_us = esp_timer_get_time();
+                break;
             }
 
-            if (bytes_read > 0) {
-                bytes_in_buffer += bytes_read;
-            } else {
-                // No data, wait a bit to avoid busy-looping
-                vTaskDelay(pdMS_TO_TICKS(1));
+            if (item_size == 0) {
+                vRingbufferReturnItem(pcm_out_buffer, (void *)item);
                 continue;
             }
+
+            size_t to_copy = item_size < remaining ? item_size : remaining;
+            memcpy((uint8_t *)audio_buffer + bytes_in_buffer, item, to_copy);
+            bytes_in_buffer += to_copy;
+
+            size_t remainder = item_size - to_copy;
+            if (remainder > 0) {
+                if (remainder > sizeof(ring_stash.data)) {
+                    ESP_LOGE(TAG, "PCM stash overflow: remainder=%zu, stash=%zu",
+                             remainder, sizeof(ring_stash.data));
+                    remainder = sizeof(ring_stash.data);
+                }
+                memcpy(ring_stash.data, item + to_copy, remainder);
+                ring_stash.len = remainder;
+                ring_stash.offset = 0;
+            }
+
+            vRingbufferReturnItem(pcm_out_buffer, (void *)item);
+        }
+
+        if (ringbuf_empty) {
+            continue;
         }
 
         // If we have a full chunk, send it
         if (bytes_in_buffer == CHUNK_SIZE) {
+            // Debug: Check for potential data corruption and timing every 1000 packets
+            static int packet_count = 0;
+            static int64_t last_packet_time_us = 0;
+            packet_count++;
+            
+            if (packet_count % 1000 == 0) {
+                int16_t *debug_samples = (int16_t*)audio_buffer;
+                int zero_count = 0;
+                int16_t max_val = 0;
+                int16_t min_val = 0;
+                
+                // Check for data patterns
+                for (int i = 0; i < CHUNK_SIZE / 2; i++) {
+                    if (debug_samples[i] == 0) zero_count++;
+                    if (debug_samples[i] > max_val) max_val = debug_samples[i];
+                    if (debug_samples[i] < min_val) min_val = debug_samples[i];
+                }
+                
+                // Check timing
+                int64_t now_us = esp_timer_get_time();
+                int64_t delta_us = last_packet_time_us ? (now_us - last_packet_time_us) : 0;
+                last_packet_time_us = now_us;
+                
+                // Also check first few samples for continuity
+                ESP_LOGD(TAG, "Audio stats: zeros=%d/%d, range=[%d,%d], packets=%d, interval=%lldms",
+                         zero_count, CHUNK_SIZE/2, min_val, max_val, packet_count, delta_us/1000);
+                ESP_LOGD(TAG, "First samples: [%d, %d, %d, %d]",
+                         debug_samples[0], debug_samples[1], debug_samples[2], debug_samples[3]);
+            }
+            
             // Apply volume
             float volume = lifecycle_get_volume();
             if (volume < 1.0f) {
@@ -654,6 +745,10 @@ static void rtp_sender_task(void *arg)
             // Feed PCM data to visualizer (after volume adjustment, before RTP packet construction)
             //pcm_viz_write((const uint8_t*)audio_buffer, CHUNK_SIZE);
 
+            if (wav_streamer_is_ready()) {
+                wav_streamer_push((const uint8_t*)audio_buffer, CHUNK_SIZE);
+            }
+
             // Build RTP packet
             build_rtp_packet(rtp_packet, (uint8_t*)audio_buffer, CHUNK_SIZE);
 
@@ -663,21 +758,42 @@ static void rtp_sender_task(void *arg)
                 sent = sendto(s_sock, rtp_packet, PACKET_SIZE, 0,
                              (struct sockaddr *)&s_dest_addr, sizeof(s_dest_addr));
                 vTaskDelay(0);
-               if (sent > 0) {
-                   //ESP_LOGI(TAG, "Sent %d bytes to network", sent);
-               } else {
-                   ESP_LOGW(TAG, "Failed to send UDP packet: errno %d, retry %d", errno, retry_count + 1);
-                   retry_count++;
-               }
+                if (sent > 0) {
+                    //ESP_LOGI(TAG, "Sent %d bytes to network", sent);
+                } else {
+                    ESP_LOGW(TAG, "Failed to send UDP packet: errno %d, retry %d", errno, retry_count + 1);
+                    vTaskDelay(retry_count * 100);
+                    retry_count++;
+                }
             }
 
             // Reset buffer for next chunk
             bytes_in_buffer = 0;
-            // Pace the sender to match the audio data rate. This prevents sending bursts of packets
-            // that can overwhelm the network stack and cause ENOMEM (errno 12) errors.
-            vTaskDelayUntil(&xLastWakeTime, xFrequency);
+            
+            // Pace the sender using precise timing to avoid drift
+            // Calculate next send time
+            next_send_time_us += send_interval_us;
+            int64_t now_us = esp_timer_get_time();
+            int64_t delay_us = next_send_time_us - now_us;
+            
+            // Only delay if we're not behind schedule
+            if (delay_us > 0) {
+                // Use busy wait for very short delays to maintain precision
+                if (delay_us < 1000) {
+                    // Busy wait for sub-millisecond precision
+            while (esp_timer_get_time() < next_send_time_us) {
+                __asm__ __volatile__("nop");
+            }
+        } else {
+                    // Use vTaskDelay for longer waits
+                    vTaskDelay(pdMS_TO_TICKS(delay_us / 1000));
+                }
+            } else if (delay_us < -send_interval_us) {
+                // We're more than one interval behind, reset timing
+                ESP_LOGW(TAG, "RTP sender lagging by %lld us, resetting timing", -delay_us);
+                next_send_time_us = esp_timer_get_time();
+            }
         }
-        vTaskDelay(0);
     }
     
     ESP_LOGI(TAG, "RTP sender task exiting, deleting task");

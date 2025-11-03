@@ -23,7 +23,7 @@ esp_err_t web_server_start(void)
     // Configure the HTTP server
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.lru_purge_enable = true;
-    config.max_uri_handlers = 55;  // Increased to accommodate all handlers
+    config.max_uri_handlers = 55;
 
     // Increase buffer size for requests
     config.recv_wait_timeout = 30;
@@ -45,10 +45,10 @@ esp_err_t web_server_start(void)
     config.core_id = 0;
     
     // Increase max open sockets if needed
-    config.max_open_sockets = 7;
+    config.max_open_sockets = 13;
     
     // Set backlog connections
-    config.backlog_conn = 5;
+    config.backlog_conn = 50;
 
     // You might need to modify sdkconfig to increase HTTPD_MAX_REQ_HDR_LEN and HTTPD_MAX_URI_LEN
 

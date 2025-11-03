@@ -18,10 +18,10 @@
     
     <div class="container" id="mainContainer">
         <h1>ESP32 RTP Transciever</h1>
+        <audio controls="" src="/stream/audio.wav" onloadstart="if (this.src.indexOf('?nocache=') == -1)this.src += '?nocache=' + Math.random()"></audio>
         
         <div class="tabs" id="tabsNav">
             <div class="tab" id="wizard-tab">Configuration</div>
-            <div class="tab" onclick="openTab(event, 'logs-tab')">Logs</div>
             <div class="tab" onclick="openTab(event, 'ota-tab')">System Update</div>
             <div class="tab active" onclick="openTab(event, 'advanced-tab')">Import/Export</div>
         </div>

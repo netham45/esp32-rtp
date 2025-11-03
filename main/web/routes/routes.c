@@ -68,6 +68,13 @@ esp_err_t register_all_routes(httpd_handle_t server)
         return ret;
     }
 
+    // Register streaming routes
+    ret = register_stream_routes(server);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to register stream routes: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
     // Register SAP routes
     ret = register_sap_routes(server);
     if (ret != ESP_OK) {

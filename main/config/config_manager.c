@@ -244,7 +244,7 @@ esp_err_t config_manager_init(void) {
     
     err = nvs_get_u8(nvs_handle, NVS_KEY_BIT_DEPTH, &u8_value);
     if (err == ESP_OK) {
-        s_app_config.bit_depth = u8_value;
+        s_app_config.bit_depth = 16;//u8_value; // TODO: Undo
     }
     
     // Read volume as u32 (stored as integer representation of float * 100)
