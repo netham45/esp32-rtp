@@ -22,6 +22,7 @@
 #include "ota_routes.h"
 #include "logs_routes.h"
 #include "sap_routes.h"
+#include "stream_routes.h"
 #include "captive_portal_routes.h"
 
 /**

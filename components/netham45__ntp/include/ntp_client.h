@@ -9,25 +9,27 @@ extern "C" {
 #endif
 
 /**
- * @brief Initializes and starts the NTP client task.
+ * @brief Initializes the NTP client state machine.
  *
- * This task will:
- * - Query mDNS for "screamrouter.local" NTP server
- * - Initialize SNTP for wall-clock time synchronization
- * - Run high-rate NTP micro-probes for precision audio synchronization
- * - Maintain a PLL for offset and skew tracking
- *
- * This function is safe to call multiple times - it will only initialize once.
+ * After initialization, call ntp_client_tick() periodically from a scheduler
+ * (e.g. the lifecycle background tick) to service mDNS resolution, SNTP updates,
+ * and precision micro-probes used for audio synchronization.
  */
 void initialize_ntp_client();
 
 /**
- * @brief Deinitializes and stops the NTP client task.
+ * @brief Deinitializes the NTP client and releases resources.
  *
- * This function stops the NTP client task and cleans up resources.
- * Safe to call even if NTP client was never initialized.
+ * Safe to call even if the NTP client was never initialized.
  */
 void deinitialize_ntp_client();
+
+/**
+ * @brief Service the NTP client logic (mDNS, SNTP updates, micro-probes).
+ *
+ * Invoke this from the main tick loop to keep the NTP client responsive.
+ */
+void ntp_client_tick();
 
 // ============================================================================
 // Precision Time Synchronization API for Audio

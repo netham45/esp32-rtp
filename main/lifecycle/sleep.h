@@ -37,8 +37,13 @@ void lifecycle_sleep_exit_silence_mode(void);
 
 /**
  * @brief Update sleep monitoring parameters from configuration
- * 
+ *
  * Called when sleep-related configuration parameters change.
- * Updates cached values used by the monitoring task.
+ * Updates cached values used by the monitoring loop.
  */
 void lifecycle_sleep_update_params(void);
+
+/**
+ * @brief Service network monitoring while in silence sleep mode.
+ */
+void lifecycle_sleep_tick(void);

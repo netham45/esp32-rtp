@@ -24,7 +24,6 @@ typedef struct {
     EventGroupHandle_t network_activity_event_group;
     
     // Network monitoring state
-    TaskHandle_t network_monitor_task_handle;
     volatile uint32_t packet_counter;
     volatile bool monitoring_active;
     volatile TickType_t last_packet_time;

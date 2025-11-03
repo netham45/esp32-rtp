@@ -29,6 +29,13 @@ static struct {
     uint32_t buffer_underruns;
 } g_usb_state = {0};
 
+typedef struct {
+    size_t pending_bytes;
+    uint8_t chunk[USB_CHUNK_SIZE];
+} usb_pcm_accumulator_t;
+
+static usb_pcm_accumulator_t s_pcm_accumulator = {0};
+
 // UAC Callback Functions
 // Called when host sends audio to device (speaker output)
 // This RECEIVES audio FROM host and writes TO our PCM buffer
@@ -40,25 +47,73 @@ static esp_err_t usb_audio_output_callback(uint8_t *buf, size_t len, void *ctx)
         return ESP_OK;
     }
     
+    // Validate input parameters
+    if (buf == NULL || len == 0) {
+        ESP_LOGW(TAG, "Invalid audio data received: buf=%p, len=%d", buf, len);
+        return ESP_OK;
+    }
     
-    // Write the received audio data to PCM ring buffer
-    BaseType_t result = xRingbufferSend(usb_in_pcm_buffer, buf, len, 0);
-    
-    if (result == pdTRUE) {
-        g_usb_state.packets_sent++;  // Actually packets received from host
-        g_usb_state.receiving_audio = true;
-        
-        // Debug log periodically
-        static int log_count = 0;
-        if (++log_count % 1000 == 0) {
-            ESP_LOGD(TAG, "USB audio received: %zu bytes, total packets: %lu",
-                     len, g_usb_state.packets_sent);
+    const uint8_t *src = buf;
+    size_t remaining = len;
+
+    while (remaining > 0) {
+        size_t space = USB_CHUNK_SIZE - s_pcm_accumulator.pending_bytes;
+        size_t to_copy = remaining < space ? remaining : space;
+
+        // Ensure we don't overflow the accumulator buffer
+        if (s_pcm_accumulator.pending_bytes + to_copy > USB_CHUNK_SIZE) {
+            ESP_LOGE(TAG, "Buffer overflow prevented: pending=%d, to_copy=%d, max=%d",
+                     s_pcm_accumulator.pending_bytes, to_copy, USB_CHUNK_SIZE);
+            s_pcm_accumulator.pending_bytes = 0;  // Reset on error
+            break;
         }
-    } else {
-        // Buffer full, drop the data
-        g_usb_state.packets_dropped++;
-        ESP_LOGW(TAG, "PCM buffer full, dropped %zu bytes (total dropped: %lu)",
-                 len, g_usb_state.packets_dropped);
+
+        memcpy(&s_pcm_accumulator.chunk[s_pcm_accumulator.pending_bytes], src, to_copy);
+        s_pcm_accumulator.pending_bytes += to_copy;
+        src += to_copy;
+        remaining -= to_copy;
+
+        if (s_pcm_accumulator.pending_bytes == USB_CHUNK_SIZE) {
+            // Debug: Check for data pattern issues to identify audio corruption
+            static int chunk_count = 0;
+            static int64_t last_chunk_time_us = 0;
+            chunk_count++;
+            
+            if (chunk_count % 1000 == 0) {
+                // Check timing between chunks
+                int64_t now_us = esp_timer_get_time();
+                int64_t delta_us = last_chunk_time_us ? (now_us - last_chunk_time_us) : 0;
+                last_chunk_time_us = now_us;
+                
+                // Check first few samples for pattern
+                int16_t *samples = (int16_t*)s_pcm_accumulator.chunk;
+                ESP_LOGI(TAG, "USB chunk %d: timing=%lldms, first samples [%d, %d, %d, %d]",
+                         chunk_count, delta_us/1000, samples[0], samples[1], samples[2], samples[3]);
+            }
+            
+            // Use higher priority for audio data - increased timeout from 3ms to 10ms
+            BaseType_t result = xRingbufferSend(usb_in_pcm_buffer,
+                                                s_pcm_accumulator.chunk,
+                                                USB_CHUNK_SIZE,
+                                                pdMS_TO_TICKS(100));
+
+            if (result == pdTRUE) {
+                g_usb_state.packets_sent++;
+                g_usb_state.receiving_audio = true;
+
+                static int log_count = 0;
+                if (++log_count % 1000 == 0) {
+                    ESP_LOGI(TAG, "USB audio queued: %u bytes, total chunks: %lu",
+                             USB_CHUNK_SIZE, g_usb_state.packets_sent);
+                }
+            } else {
+                g_usb_state.packets_dropped++;
+                ESP_LOGW(TAG, "PCM buffer full, dropped %u bytes (total dropped: %lu)",
+                         USB_CHUNK_SIZE, g_usb_state.packets_dropped);
+            }
+
+            s_pcm_accumulator.pending_bytes = 0;
+        }
     }
     
     return ESP_OK;
@@ -84,8 +139,8 @@ static void usb_audio_task(void *arg)
     uint32_t last_packets_sent = 0;
     
     while (g_usb_state.running) {
-        // Check activity every second
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        // Check activity every 100th second
+        vTaskDelay(pdMS_TO_TICKS(10));
         
         // Log statistics if there's activity
         if (g_usb_state.packets_sent != last_packets_sent) {
@@ -216,6 +271,9 @@ esp_err_t usb_in_start(void)
     g_usb_state.packets_dropped = 0;
     g_usb_state.buffer_underruns = 0;
     
+    // Clear accumulator to ensure clean start
+    memset(&s_pcm_accumulator, 0, sizeof(s_pcm_accumulator));
+    
     // Set running flag
     g_usb_state.running = true;
     g_usb_state.receiving_audio = false;
@@ -226,7 +284,7 @@ esp_err_t usb_in_start(void)
         "usb_audio",
         USB_TASK_STACK_SIZE,
         NULL,
-        USB_TASK_PRIORITY,
+        7,
         &g_usb_state.audio_task,
         1
     );
@@ -279,6 +337,9 @@ esp_err_t usb_in_stop(void)
     ESP_LOGI(TAG, "  Packets received from host: %lu", g_usb_state.packets_sent);
     ESP_LOGI(TAG, "  Packets dropped: %lu", g_usb_state.packets_dropped);
     ESP_LOGI(TAG, "  Buffer underruns: %lu", g_usb_state.buffer_underruns);
+    
+    // Clear accumulator on stop
+    memset(&s_pcm_accumulator, 0, sizeof(s_pcm_accumulator));
     
     return ESP_OK;
 }

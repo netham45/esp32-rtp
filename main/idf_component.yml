@@ -6,7 +6,6 @@ dependencies:
   netham45/usb_uac_device_in: '*'
   netham45/usb_uac_host_out: '*'
   netham45/bq25895: '*'
-  netham45/visualizer: '*'
   netham45/ntp: '*'
   netham45/wifi_manager: '*'
   netham45/TS3USB30ERSWR: '*'

@@ -10,6 +10,11 @@
 #include "wifi_manager.h"
 #include "../mdns/mdns_discovery.h"
 #include "../mdns/mdns_service.h"
+#include "../sender/network_out.h"
+#include "../receiver/sap_listener.h"
+#include "../receiver/network_in.h"
+#include "../receiver/audio_out.h"
+#include "ntp_client.h"
 #include "bq25895_integration.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -23,6 +28,7 @@
 
 static QueueHandle_t s_lifecycle_event_queue = NULL;
 static lifecycle_state_t s_current_state = LIFECYCLE_STATE_INITIALIZING;
+static TaskHandle_t s_lifecycle_hot_loop_task = NULL;
 
 // Forward declarations for state handlers
 static void handle_state_initializing(lifecycle_event_t event);
@@ -37,6 +43,8 @@ static void handle_state_sleeping(lifecycle_event_t event);
 static void handle_state_error(lifecycle_event_t event);
 static void handle_state_pairing(lifecycle_event_t event);
 static void lifecycle_run_background_tasks(void);
+static bool lifecycle_run_hot_loop_tasks(void);
+static void lifecycle_hot_loop_task(void *pvParameters);
 
 // Forward declarations for state transition helpers
 static void set_state(lifecycle_state_t new_state);
@@ -393,10 +401,46 @@ static void handle_state_pairing(lifecycle_event_t event) {
     }
 }
 
+static bool lifecycle_receiver_state_active(void) {
+    return (s_current_state == LIFECYCLE_STATE_MODE_RECEIVER_USB ||
+            s_current_state == LIFECYCLE_STATE_MODE_RECEIVER_SPDIF);
+}
+
+static bool lifecycle_run_hot_loop_tasks(void) {
+    if (!lifecycle_receiver_state_active()) {
+        return false;
+    }
+
+    network_in_tick();
+    audio_out_tick();
+    return true;
+}
+
+static void lifecycle_hot_loop_task(void *pvParameters) {
+    ESP_LOGI(TAG, "Lifecycle hot loop task started.");
+    TickType_t idle_delay = pdMS_TO_TICKS(10);
+    if (idle_delay == 0) {
+        idle_delay = 1;
+    }
+
+    while (1) {
+        bool active = lifecycle_run_hot_loop_tasks();
+        if (active) {
+            taskYIELD();
+        } else {
+            vTaskDelay(idle_delay);
+        }
+    }
+}
+
 static void lifecycle_run_background_tasks(void) {
     mdns_discovery_tick();
     mdns_service_txt_update_tick();
     bq25895_integration_tick();
+    rtp_sender_tick();
+    ntp_client_tick();
+    sap_listener_tick();
+    lifecycle_sleep_tick();
 }
 
 /**
@@ -464,9 +508,15 @@ esp_err_t lifecycle_state_machine_init(void) {
         return ESP_FAIL;
     }
 
-    BaseType_t ret = xTaskCreatePinnedToCore(lifecycle_manager_task, "lifecycle_mgr", 8192, NULL, 5, NULL, 0);
+    BaseType_t ret = xTaskCreatePinnedToCore(lifecycle_manager_task, "lifecycle_mgr", 6144, NULL, 5, NULL, 0);
     if (ret != pdPASS) {
         ESP_LOGE(TAG, "Failed to create lifecycle manager task");
+        return ESP_FAIL;
+    }
+
+    ret = xTaskCreatePinnedToCore(lifecycle_hot_loop_task, "lifecycle_hot", 4096, NULL, 5, &s_lifecycle_hot_loop_task, 1);
+    if (ret != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create lifecycle hot loop task");
         return ESP_FAIL;
     }
 

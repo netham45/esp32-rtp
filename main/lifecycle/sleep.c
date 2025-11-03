@@ -29,89 +29,73 @@ static inline lifecycle_context_t* get_ctx(void) {
     return lifecycle_get_context();
 }
 
-/**
- * @brief Network monitor task
- * 
- * Monitors network activity during sleep mode and wakes the device
- * when sufficient activity is detected.
- */
-static void network_monitor_task(void *params) {
-    ESP_LOGI(TAG, "Network monitor task started");
+typedef struct {
+    TickType_t last_interval_check;
+} network_monitor_runtime_t;
+
+static network_monitor_runtime_t s_network_monitor_runtime = {
+    .last_interval_check = 0
+};
+
+static inline uint32_t ticks_to_ms(TickType_t ticks) {
+    return ticks * portTICK_PERIOD_MS;
+}
+
+static void network_monitor_service(void) {
     lifecycle_context_t *ctx = get_ctx();
+    if (!ctx->monitoring_active || s_network_activity_event_group == NULL) {
+        return;
+    }
 
-    // Initialize the last packet time
-    ctx->last_packet_time = xTaskGetTickCount();
+    TickType_t now_ticks = xTaskGetTickCount();
 
-    while (true) {
-        if (ctx->monitoring_active) {
-            // Use cached interval value for thread-safe access
-            uint32_t check_interval = ctx->cached_network_check_interval_ms;
-            
-            // Wait for a packet notification OR timeout
-            EventBits_t bits = xEventGroupWaitBits(
-                s_network_activity_event_group,   // The event group being tested.
-                NETWORK_PACKET_RECEIVED_BIT,      // The bits within the event group to wait for.
-                pdTRUE,                           // NETWORK_PACKET_RECEIVED_BIT should be cleared before returning.
-                pdFALSE,                          // Don't wait for all bits, any bit will do (we only have one).
-                pdMS_TO_TICKS(check_interval)     // Use cached value for wait time
-            );
+    // Capture and clear packet notifications without blocking
+    EventBits_t bits = xEventGroupWaitBits(
+        s_network_activity_event_group,
+        NETWORK_PACKET_RECEIVED_BIT,
+        pdTRUE,
+        pdFALSE,
+        0
+    );
 
-            // Check if still monitoring after the wait (could have been disabled by exit_silence_sleep_mode)
-            if (!ctx->monitoring_active) {
-                continue; // Exit loop iteration if monitoring was stopped during wait
-            }
+    uint8_t activity_threshold = ctx->cached_activity_threshold_packets;
+    uint32_t inactivity_timeout = ctx->cached_network_inactivity_timeout_ms;
 
-            TickType_t current_time = xTaskGetTickCount();
-            TickType_t time_since_last_packet = (current_time - ctx->last_packet_time) * portTICK_PERIOD_MS;
-
-            // Get cached threshold values for thread-safe access
-            uint8_t activity_threshold = ctx->cached_activity_threshold_packets;
-            uint32_t inactivity_timeout = ctx->cached_network_inactivity_timeout_ms;
-
-            // Did we receive a packet notification?
-            if (bits & NETWORK_PACKET_RECEIVED_BIT) {
-                ESP_LOGD(TAG, "Monitor: Packet received event bit set.");
-                // packet_counter and last_packet_time are updated in network.c when the bit is set
-                // Check if the activity threshold is met
-                if (ctx->packet_counter >= activity_threshold) {
-                    ESP_LOGI(TAG, "Network activity threshold met (%" PRIu32 " packets >= %d), exiting sleep mode",
-                            ctx->packet_counter, activity_threshold);
-                    lifecycle_manager_post_event(LIFECYCLE_EVENT_WAKE_UP);
-                } else {
-                    ESP_LOGD(TAG, "Monitor: Packet count %" PRIu32 " < threshold %d", ctx->packet_counter, activity_threshold);
-                }
-            } else {
-                // No packet notification bit set, timeout occurred. Check for inactivity timeout.
-                ESP_LOGD(TAG, "Monitor: Wait timeout. Packets=%" PRIu32 ", time_since_last=%lu ms", ctx->packet_counter, (unsigned long)time_since_last_packet);
-                if (time_since_last_packet >= inactivity_timeout) {
-                    ESP_LOGI(TAG, "Network inactivity timeout reached (%lu ms >= %lu ms), maintaining sleep mode",
-                            (unsigned long)time_since_last_packet, (unsigned long)inactivity_timeout);
-                    // Update timestamp to prevent continuous logging of the same timeout event
-                    // Note: last_packet_time is only updated here on timeout, or in network.c on packet arrival.
-                    ctx->last_packet_time = current_time;
-                }
-            }
-            // The loop continues, waiting again with xEventGroupWaitBits which includes the delay
-
+    if (bits & NETWORK_PACKET_RECEIVED_BIT) {
+        ESP_LOGD(TAG, "Monitor: Packet received event bit set.");
+        if (ctx->packet_counter >= activity_threshold) {
+            ESP_LOGI(TAG, "Network activity threshold met (%" PRIu32 " packets >= %d), exiting sleep mode",
+                     ctx->packet_counter, activity_threshold);
+            lifecycle_manager_post_event(LIFECYCLE_EVENT_WAKE_UP);
         } else {
-            // When not actively monitoring, suspend the task to save CPU
-            ESP_LOGD(TAG, "Monitoring inactive, suspending monitor task.");
-            // Clear any pending event bits before suspending
-            if (s_network_activity_event_group) {
-                xEventGroupClearBits(s_network_activity_event_group, NETWORK_PACKET_RECEIVED_BIT);
-            }
-            vTaskSuspend(NULL);
-            // --- Task resumes here when vTaskResume is called (in enter_silence_sleep_mode) ---
-            ESP_LOGD(TAG, "Monitor task resumed.");
-            // Reset state when resuming
-            ctx->last_packet_time = xTaskGetTickCount();
-            ctx->packet_counter = 0; // Reset packet counter when monitoring starts/resumes
-            // Clear event bits again on resume just in case
-            if (s_network_activity_event_group) {
-                xEventGroupClearBits(s_network_activity_event_group, NETWORK_PACKET_RECEIVED_BIT);
-            }
+            ESP_LOGD(TAG, "Monitor: Packet count %" PRIu32 " < threshold %d",
+                     ctx->packet_counter, activity_threshold);
         }
     }
+
+    // Periodic inactivity evaluation
+    TickType_t interval_ticks = pdMS_TO_TICKS(ctx->cached_network_check_interval_ms);
+    if (interval_ticks == 0) {
+        interval_ticks = 1;
+    }
+
+    if ((now_ticks - s_network_monitor_runtime.last_interval_check) >= interval_ticks) {
+        TickType_t elapsed_ms = ticks_to_ms(now_ticks - ctx->last_packet_time);
+        ESP_LOGD(TAG, "Monitor: Interval check. Packets=%" PRIu32 ", time_since_last=%lu ms",
+                 ctx->packet_counter, (unsigned long)elapsed_ms);
+
+        if (elapsed_ms >= inactivity_timeout) {
+            ESP_LOGI(TAG, "Network inactivity timeout reached (%lu ms >= %lu ms), maintaining sleep mode",
+                     (unsigned long)elapsed_ms, (unsigned long)inactivity_timeout);
+            ctx->last_packet_time = now_ticks;
+        }
+
+        s_network_monitor_runtime.last_interval_check = now_ticks;
+    }
+}
+
+void lifecycle_sleep_tick(void) {
+    network_monitor_service();
 }
 
 void lifecycle_sleep_enter_silence_mode(void) {
@@ -139,7 +123,7 @@ void lifecycle_sleep_enter_silence_mode(void) {
         return;
     }
     
-    // Update cached values from config for thread-safe access in monitor task
+    // Update cached values from config for thread-safe access in monitor loop
     lifecycle_context_t *ctx = get_ctx();
     ctx->cached_silence_threshold_ms = config->silence_threshold_ms;
     ctx->cached_network_check_interval_ms = config->network_check_interval_ms;
@@ -162,29 +146,14 @@ void lifecycle_sleep_enter_silence_mode(void) {
     // Suppress WiFi warnings
     esp_log_level_set("wifi", ESP_LOG_ERROR);
 
-    // Create network monitoring task if it doesn't exist yet
-    if (ctx->network_monitor_task_handle == NULL) {
-        BaseType_t task_ret = xTaskCreatePinnedToCore(
-            network_monitor_task,
-            "network_monitor",
-            4096,
-            NULL,
-            5,  // Low priority
-            &ctx->network_monitor_task_handle,
-            0   // Core 0
-        );
-        if (task_ret != pdTRUE) {
-            ESP_LOGE(TAG, "Failed to create network monitor task");
-            return;
-        }
-    }
-    
-    // Start network monitoring
+    // Reset monitoring state and begin servicing via tick loop
     ctx->monitoring_active = true;
     ctx->packet_counter = 0;
-    if (eTaskGetState(ctx->network_monitor_task_handle) == eSuspended) {
-        vTaskResume(ctx->network_monitor_task_handle);
-    }
+    ctx->last_packet_time = xTaskGetTickCount();
+    s_network_monitor_runtime.last_interval_check = ctx->last_packet_time;
+
+    // Clear any stale packet notifications before entering monitoring loop
+    xEventGroupClearBits(s_network_activity_event_group, NETWORK_PACKET_RECEIVED_BIT);
     
     ESP_LOGI(TAG, "Entered light sleep mode with network monitoring");
 }
@@ -229,7 +198,7 @@ void lifecycle_sleep_report_network_activity(void) {
     if (ctx->monitoring_active) {
         ctx->packet_counter++;
         ctx->last_packet_time = xTaskGetTickCount();
-        // Signal the network monitor task that a packet has been received
+        // Signal the network monitor loop that a packet has been received
         if (s_network_activity_event_group) {
             xEventGroupSetBits(s_network_activity_event_group, NETWORK_PACKET_RECEIVED_BIT);
         }

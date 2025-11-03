@@ -7,3 +7,6 @@
 [submodule "components/netham45__spdif_in"]
 	path = components/netham45__spdif_in
 	url = https://github.com/netham45/esp32-spdif
+[submodule "main/deps/opus"]
+	path = main/deps/opus
+	url = https://github.com/xiph/opus.git

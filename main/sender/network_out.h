@@ -64,3 +64,8 @@ void rtp_sender_set_volume(uint32_t volume);
  */
 esp_err_t rtp_sender_auto_select_device(void);
 esp_err_t rtp_sender_update_destination(void);
+
+/**
+ * @brief Service SAP announcement scheduling from the lifecycle tick loop
+ */
+void rtp_sender_tick(void);

@@ -9,26 +9,6 @@ dependencies:
       registry_url: https://components.espressif.com
       type: service
     version: 1.1.1
-  espressif/esp-dsp:
-    component_hash: a9a1e516033ce2ea63e6286cc227d8ecb87769d628dcc6394b4e024311ac64b9
-    dependencies:
-    - name: idf
-      require: private
-      version: '>=4.2'
-    source:
-      registry_url: https://components.espressif.com/
-      type: service
-    version: 1.3.0
-  espressif/led_strip:
-    component_hash: 223998f10cae6d81f2ad2dd3c1103c2221be298c708e37917482b0153f3ec64e
-    dependencies:
-    - name: idf
-      require: private
-      version: '>=5.0'
-    source:
-      registry_url: https://components.espressif.com/
-      type: service
-    version: 3.0.1~1
   espressif/mdns:
     component_hash: 3ec0af5f6bce310512e90f482388d21cc7c0e99668172d2f895356165fc6f7c5
     dependencies:
@@ -127,12 +107,6 @@ dependencies:
       path: C:\Users\Nathan\Documents\GitHub\esp32-rtp\components\netham45__usb_uac_host_out
       type: local
     version: 1.0.0
-  netham45/visualizer:
-    dependencies: []
-    source:
-      path: C:\Users\Nathan\Documents\GitHub\esp32-rtp\components\netham45__visualizer
-      type: local
-    version: 1.0.0
   netham45/wifi_manager:
     dependencies: []
     source:
@@ -140,8 +114,6 @@ dependencies:
       type: local
     version: 1.0.0
 direct_dependencies:
-- espressif/esp-dsp
-- espressif/led_strip
 - espressif/mdns
 - espressif/usb_device_uac
 - espressif/usb_host_uac
@@ -153,8 +125,7 @@ direct_dependencies:
 - netham45/spdif_out
 - netham45/usb_uac_device_in
 - netham45/usb_uac_host_out
-- netham45/visualizer
 - netham45/wifi_manager
-manifest_hash: 2655ec9adccee45508faec2b66b28090f2a691e59734645b0e9a7eaaa03c82d1
+manifest_hash: a2a142bcf97b5b8f507e2d698ad41c6edbfff7db1ff1f6ce8fe27ca5775c3d24
 target: esp32s3
 version: 2.0.0
