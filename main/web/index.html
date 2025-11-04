@@ -18,7 +18,8 @@
     
     <div class="container" id="mainContainer">
         <h1>ESP32 RTP Transciever</h1>
-        <audio controls="" src="/stream/audio.wav" onloadstart="if (this.src.indexOf('?nocache=') == -1)this.src += '?nocache=' + Math.random()"></audio>
+        <a href="#" onclick="let tag=document.getElementById('audiotag');tag.style.display='block';tag.src='/stream/audio.wav?nocache='+Math.random();this.style.display='none'">Listen</a>
+        <audio controls="" style="display: none" id="audiotag"></audio>
         
         <div class="tabs" id="tabsNav">
             <div class="tab" id="wizard-tab">Configuration</div>
