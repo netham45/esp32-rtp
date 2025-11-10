@@ -27,7 +27,9 @@
         "spdif_out.h": "c",
         "string.h": "c",
         "esp_log.h": "c",
-        "ts3usb30erswr.h": "c"
+        "ts3usb30erswr.h": "c",
+        "bq25895_json.h": "c",
+        "uac_host.h": "c"
     },
     "chat.agent.enabled": false,
     "chat.commandCenter.enabled": false,
@@ -36,5 +38,7 @@
     "idf.openOcdConfigs": [
         "board/esp32s3-bridge.cfg"
     ],
-    "idf.monitorPort": "COM8"
+    "idf.monitorPort": "COM8",
+    "idf.espIdfPathWin": "C:\\Users\\Nathan Ladwig\\esp\\v5.5.1\\esp-idf",
+    "idf.toolsPathWin": "C:\\Espressif"
 }

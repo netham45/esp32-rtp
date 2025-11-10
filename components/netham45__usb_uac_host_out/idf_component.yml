@@ -2,7 +2,7 @@ dependencies:
   idf:
     version: '>=5.4'
   espressif/usb_host_uac:
-    version: 1.0.*
+    version: '>=1.3.2'
     rules:
     - if: target in [esp32s2, esp32s3, esp32p4]
 description: USB UAC 1.0 Host Output Driver

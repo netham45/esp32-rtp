@@ -10,3 +10,6 @@
 [submodule "main/deps/opus"]
 	path = main/deps/opus
 	url = https://github.com/xiph/opus.git
+[submodule "main/deps/live555"]
+	path = main/deps/live555
+	url = https://github.com/rgaufman/live555

@@ -102,6 +102,7 @@ static esp_err_t start_mode_sender_usb(void) {
 
     // Initialize visualizer for audio visualization
     
+    ret = ESP_OK;
 //    ret = visualizer_init();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize visualizer: %s", esp_err_to_name(ret));
@@ -234,7 +235,6 @@ static esp_err_t stop_mode_sender_spdif(void) {
 }
 
 // ==================== USB Receiver Mode ====================
-
 static esp_err_t start_mode_receiver_usb(void) {
     ESP_LOGI(TAG, "Starting USB receiver mode...");
     
@@ -246,7 +246,29 @@ static esp_err_t start_mode_receiver_usb(void) {
         // Non-critical, continue
     }
     
-    // Setup audio output first
+    // Initialize USB host subsystem
+    
+    ret = usb_out_init();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize USB host: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    // Get audio parameters from lifecycle manager
+    uint32_t sample_rate = lifecycle_get_sample_rate();
+    uint8_t bit_depth = lifecycle_get_bit_depth();
+    float volume = lifecycle_get_volume() * 100.0f; // Convert to percentage
+
+    // Start USB host for DAC output with audio parameters
+    ret = usb_out_start(sample_rate, bit_depth, volume);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start USB host: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    ESP_LOGI(TAG, "USB host started; USB DAC will be usable once enumeration completes");
+
+    // Setup audio output
     setup_audio();
 
     // Setup buffer for network->USB streaming
@@ -269,36 +291,6 @@ static esp_err_t start_mode_receiver_usb(void) {
             ESP_LOGI(TAG, "SAP listener started successfully");
         }
     }
-
-    // Initialize USB host subsystem
-    
-    ret = usb_out_init();
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to initialize USB host: %s", esp_err_to_name(ret));
-        return ret;
-    }
-
-    // Get audio parameters from lifecycle manager
-    uint32_t sample_rate = lifecycle_get_sample_rate();
-    uint8_t bit_depth = lifecycle_get_bit_depth();
-    float volume = lifecycle_get_volume() * 100.0f; // Convert to percentage
-
-    // Start USB host for DAC output with audio parameters
-    ret = usb_out_start(sample_rate, bit_depth, volume);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to start USB host: %s", esp_err_to_name(ret));
-        return ret;
-    }
-    
-    // Initialize visualizer for audio visualization
-    
-//    ret = visualizer_init();
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to initialize visualizer: %s", esp_err_to_name(ret));
-        // Non-critical, continue
-    } else {
-        ESP_LOGI(TAG, "Visualizer initialized successfully");
-    }
     
     ESP_LOGI(TAG, "USB receiver mode started successfully");
     return ESP_OK;
@@ -307,12 +299,7 @@ static esp_err_t start_mode_receiver_usb(void) {
 static esp_err_t stop_mode_receiver_usb(void) {
     ESP_LOGI(TAG, "Stopping USB receiver mode...");
     
-    // Stop visualizer first
-//    esp_err_t ret = visualizer_deinit();
-    esp_err_t ret = ESP_OK;
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to stop visualizer: %s", esp_err_to_name(ret));
-    }
+    esp_err_t ret;
     
     ret = usb_out_stop();
     if (ret != ESP_OK) {

@@ -1,6 +1,16 @@
 dependencies:
+  espressif/cjson:
+    component_hash: 9372811fb197926f522c467627cf4a8e72b681e0366e17879631da801103aef3
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.7.19
   espressif/cmake_utilities:
-    component_hash: 05165f30922b422b4b90c08845e6d449329b97370fbd06309803d8cb539d79e3
+    component_hash: 351350613ceafba240b761b4ea991e0f231ac7a9f59a9ee901f751bddc0bb18f
     dependencies:
     - name: idf
       require: private
@@ -8,7 +18,7 @@ dependencies:
     source:
       registry_url: https://components.espressif.com
       type: service
-    version: 1.1.1
+    version: 0.5.3
   espressif/mdns:
     component_hash: 3ec0af5f6bce310512e90f482388d21cc7c0e99668172d2f895356165fc6f7c5
     dependencies:
@@ -42,11 +52,32 @@ dependencies:
     - esp32p4
     version: 0.2.0
   espressif/usb_host_uac:
-    dependencies: []
+    component_hash: d0fbcada2e962f6f4084cbf111466126eb9bcd712f36524e6f69c9f56b2e206a
+    dependencies:
+    - name: espressif/cmake_utilities
+      registry_url: https://components.espressif.com
+      require: private
+      version: 0.5.*
+    - name: idf
+      require: private
+      version: '>=4.4'
+    - name: espressif/usb
+      registry_url: https://components.espressif.com
+      require: public
+      rules:
+      - if: idf_version >=6.0
+      - if: target not in ["linux"]
+      version: ^1.0.0
     source:
-      path: C:\Users\Nathan\Documents\GitHub\esp32-rtp\components\espressif__usb_host_uac
-      type: local
-    version: 1.0.0
+      registry_url: https://components.espressif.com/
+      type: service
+    targets:
+    - esp32s2
+    - esp32s3
+    - esp32p4
+    - esp32h4
+    - linux
+    version: 1.3.2
   idf:
     source:
       type: idf
@@ -68,52 +99,53 @@ dependencies:
   netham45/TS3USB30ERSWR:
     dependencies: []
     source:
-      path: C:\Users\Nathan\Documents\GitHub\esp32-rtp\components\netham45__TS3USB30ERSWR
+      path: C:\Users\Nathan Ladwig\Documents\GitHub\esp32-rtp\components\netham45__TS3USB30ERSWR
       type: local
     version: 1.0.0
   netham45/bq25895:
     dependencies: []
     source:
-      path: C:\Users\Nathan\Documents\GitHub\esp32-rtp\components\netham45__bq25895
+      path: C:\Users\Nathan Ladwig\Documents\GitHub\esp32-rtp\components\netham45__bq25895
       type: local
     version: 1.0.0
   netham45/ntp:
     dependencies: []
     source:
-      path: C:\Users\Nathan\Documents\GitHub\esp32-rtp\components\netham45__ntp
+      path: C:\Users\Nathan Ladwig\Documents\GitHub\esp32-rtp\components\netham45__ntp
       type: local
     version: 1.0.0
   netham45/spdif_in:
     dependencies: []
     source:
-      path: C:\Users\Nathan\Documents\GitHub\esp32-rtp\components\netham45__spdif_in
+      path: C:\Users\Nathan Ladwig\Documents\GitHub\esp32-rtp\components\netham45__spdif_in
       type: local
     version: 1.0.0
   netham45/spdif_out:
     dependencies: []
     source:
-      path: C:\Users\Nathan\Documents\GitHub\esp32-rtp\components\netham45__spdif_out
+      path: C:\Users\Nathan Ladwig\Documents\GitHub\esp32-rtp\components\netham45__spdif_out
       type: local
     version: 1.0.0
   netham45/usb_uac_device_in:
     dependencies: []
     source:
-      path: C:\Users\Nathan\Documents\GitHub\esp32-rtp\components\netham45__usb_uac_device_in
+      path: C:\Users\Nathan Ladwig\Documents\GitHub\esp32-rtp\components\netham45__usb_uac_device_in
       type: local
     version: 1.0.0
   netham45/usb_uac_host_out:
     dependencies: []
     source:
-      path: C:\Users\Nathan\Documents\GitHub\esp32-rtp\components\netham45__usb_uac_host_out
+      path: C:\Users\Nathan Ladwig\Documents\GitHub\esp32-rtp\components\netham45__usb_uac_host_out
       type: local
     version: 1.0.0
   netham45/wifi_manager:
     dependencies: []
     source:
-      path: C:\Users\Nathan\Documents\GitHub\esp32-rtp\components\netham45__wifi_manager
+      path: C:\Users\Nathan Ladwig\Documents\GitHub\esp32-rtp\components\netham45__wifi_manager
       type: local
     version: 1.0.0
 direct_dependencies:
+- espressif/cjson
 - espressif/mdns
 - espressif/usb_device_uac
 - espressif/usb_host_uac
@@ -126,6 +158,6 @@ direct_dependencies:
 - netham45/usb_uac_device_in
 - netham45/usb_uac_host_out
 - netham45/wifi_manager
-manifest_hash: a2a142bcf97b5b8f507e2d698ad41c6edbfff7db1ff1f6ce8fe27ca5775c3d24
+manifest_hash: 0e215efe2ab8f3ac4ecac451876f2e1da9f452ee32a5d1f7cdea80be33a9850d
 target: esp32s3
 version: 2.0.0

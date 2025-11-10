@@ -7,13 +7,13 @@
 #define FIRMWARE_VERSION_PATCH  1
 
 // Build number (can be auto-incremented by build system
-#define FIRMWARE_BUILD_NUMBER   263
+#define FIRMWARE_BUILD_NUMBER   340
 
 // Version string format: "major.minor.patch-build"
-#define FIRMWARE_VERSION_STRING "1.0.1-263"
+#define FIRMWARE_VERSION_STRING "1.0.1-340"
 
 // Full version string with additional info
-#define FIRMWARE_VERSION_FULL   "ESP32 RTP Transciever v1.0.1-263"
+#define FIRMWARE_VERSION_FULL   "ESP32 RTP Transciever v1.0.1-340"
 
 // Application name
 #define FIRMWARE_APP_NAME       "esp32-rtp"

@@ -19,6 +19,8 @@ esp_err_t usb_out_stop(void);
 esp_err_t usb_out_deinit(void);
 uac_host_device_handle_t usb_out_get_device_handle(void);
 bool usb_out_is_connected(void);
+bool usb_out_is_ready(void);
+esp_err_t usb_out_wait_until_ready(uint32_t timeout_ms);
 
 // Audio write functions
 esp_err_t usb_out_write(const uint8_t *data, size_t size, TickType_t timeout);

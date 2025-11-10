@@ -133,6 +133,7 @@ static void uac_device_callback(uac_host_device_handle_t uac_device_handle, cons
         // Clear device handle
         s_usb_state.spk_dev_handle = NULL;
         s_spk_dev_handle = NULL;  // Update global handle for web_server.c
+        s_usb_state.device_enumeration_complete = false;
         // Note: External playback control should be handled by the caller
         
         // Close the device handle
@@ -202,25 +203,67 @@ static void usb_lib_task(void *arg)
     ESP_LOGI(TAG, "USB Host library installed");
     xTaskNotifyGive(arg);
 
-    while (s_usb_state.usb_host_running) {
-        uint32_t event_flags;
-        usb_host_lib_handle_events(portMAX_DELAY, &event_flags);
-        
-        // Handle USB host library events
+    bool shutdown_started = false;
+    uint32_t shutdown_events = 0;
+    const uint32_t required_events = USB_HOST_LIB_EVENT_FLAGS_NO_CLIENTS |
+                                     USB_HOST_LIB_EVENT_FLAGS_ALL_FREE;
+
+    while (true) {
+        uint32_t event_flags = 0;
+        esp_err_t evt_ret = usb_host_lib_handle_events(pdMS_TO_TICKS(100), &event_flags);
+        if (evt_ret != ESP_OK && evt_ret != ESP_ERR_TIMEOUT) {
+            ESP_LOGE(TAG, "usb_host_lib_handle_events failed: %s", esp_err_to_name(evt_ret));
+            continue;
+        }
+
         if (event_flags & USB_HOST_LIB_EVENT_FLAGS_NO_CLIENTS) {
             ESP_LOGW(TAG, "No clients connected");
-            ESP_ERROR_CHECK(usb_host_device_free_all());
-            break;
+            if (!shutdown_started) {
+                ESP_LOGW(TAG, "USB host reported no clients while still running; forcing shutdown");
+                s_usb_state.usb_host_running = false;
+                shutdown_started = true;
+                shutdown_events = 0;
+            }
+            shutdown_events |= USB_HOST_LIB_EVENT_FLAGS_NO_CLIENTS;
+            esp_err_t free_ret = usb_host_device_free_all();
+            if (free_ret == ESP_ERR_INVALID_STATE) {
+                shutdown_events |= USB_HOST_LIB_EVENT_FLAGS_ALL_FREE;
+            } else if (free_ret != ESP_OK) {
+                ESP_LOGW(TAG, "usb_host_device_free_all failed: %s", esp_err_to_name(free_ret));
+            }
         }
+
         if (event_flags & USB_HOST_LIB_EVENT_FLAGS_ALL_FREE) {
             ESP_LOGI(TAG, "All devices freed");
+            if (shutdown_started) {
+                shutdown_events |= USB_HOST_LIB_EVENT_FLAGS_ALL_FREE;
+            }
+        }
+
+        if (!shutdown_started && !s_usb_state.usb_host_running) {
+            shutdown_started = true;
+            shutdown_events = 0;
+            ESP_LOGI(TAG, "USB host shutdown requested");
+            esp_err_t free_ret = usb_host_device_free_all();
+            if (free_ret == ESP_ERR_INVALID_STATE) {
+                shutdown_events |= USB_HOST_LIB_EVENT_FLAGS_ALL_FREE;
+            } else if (free_ret != ESP_OK) {
+                ESP_LOGW(TAG, "usb_host_device_free_all during shutdown failed: %s",
+                         esp_err_to_name(free_ret));
+            }
+        }
+
+        if (shutdown_started && (shutdown_events & required_events) == required_events) {
             break;
         }
     }
 
     ESP_LOGI(TAG, "USB Host library shutting down");
-    vTaskDelay(10); // Short delay to allow cleanup
-    ESP_ERROR_CHECK(usb_host_uninstall());
+    vTaskDelay(pdMS_TO_TICKS(10)); // Short delay to allow cleanup
+    esp_err_t uninstall_ret = usb_host_uninstall();
+    if (uninstall_ret != ESP_OK) {
+        ESP_LOGE(TAG, "usb_host_uninstall failed: %s", esp_err_to_name(uninstall_ret));
+    }
     vTaskDelete(NULL);
 }
 
@@ -353,6 +396,7 @@ static void uac_lib_task(void *arg)
                         if (device_handle == s_usb_state.spk_dev_handle) {
                             s_usb_state.spk_dev_handle = NULL;
                             s_spk_dev_handle = NULL;  // Update global handle for web_server.c
+                            s_usb_state.device_enumeration_complete = false;
                             // Device parameters remain saved for potential reconnection
                             ESP_LOGI(TAG, "Device handle cleaned up, parameters saved for reconnection");
                         }
@@ -579,6 +623,37 @@ uac_host_device_handle_t usb_out_get_device_handle(void) {
 
 bool usb_out_is_connected(void) {
     return s_usb_state.spk_dev_handle != NULL;
+}
+
+bool usb_out_is_ready(void) {
+    return s_usb_state.device_enumeration_complete &&
+           s_usb_state.usb_host_running &&
+           s_usb_state.spk_dev_handle != NULL;
+}
+
+esp_err_t usb_out_wait_until_ready(uint32_t timeout_ms) {
+    const uint32_t poll_ms = 10;
+    uint32_t waited_ms = 0;
+
+    while (true) {
+        if (usb_out_is_ready()) {
+            ESP_LOGI(TAG, "USB endpoint ready after %u ms", waited_ms);
+            return ESP_OK;
+        }
+
+        if (!usb_out_is_connected()) {
+            ESP_LOGW(TAG, "USB DAC disconnected while waiting for readiness");
+            return ESP_ERR_INVALID_STATE;
+        }
+
+        if (timeout_ms > 0 && waited_ms >= timeout_ms) {
+            ESP_LOGE(TAG, "Timed out waiting %u ms for USB DAC readiness", timeout_ms);
+            return ESP_ERR_TIMEOUT;
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(poll_ms));
+        waited_ms += poll_ms;
+    }
 }
 
 esp_err_t usb_out_deinit(void) {
