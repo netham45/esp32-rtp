@@ -30,8 +30,8 @@
 #include "esp_log.h"
 #include "esp_heap_caps.h"
 #include "buffer.h"
-#include "esp_timer.h"
 #include "config/config_manager.h"
+#include "esp_timer.h"
 
 // Low-rate summary interval default if not provided by Kconfig
 #ifndef CONFIG_RTP_RX_LOG_SUMMARY_INTERVAL_MS
@@ -93,6 +93,14 @@ static int unicast_sock = -1;   // Socket for configured port (always active)
 static int multicast_sock = -1; // Socket for multicast groups (when in multicast mode)
 #ifdef CONFIG_RTCP_ENABLED
 static int rtcp_sock = -1; // Socket for RTCP packets (port + 1)
+#if defined(CONFIG_RTCP_SEND_RR)
+#ifndef CONFIG_RTCP_RR_INTERVAL_MS
+#define CONFIG_RTCP_RR_INTERVAL_MS 5000
+#endif
+static uint64_t s_rtcp_rr_next_due_us = 0;
+static struct sockaddr_in s_rtcp_rr_peer_addr;
+static bool s_rtcp_rr_peer_valid = false;
+#endif
 #endif
 static bool s_network_tick_enabled = false;
 
@@ -204,6 +212,49 @@ static bool ensure_opus_decoder(uint32_t sample_rate, int channels)
     return true;
 }
 
+#if defined(CONFIG_RTCP_ENABLED) && defined(CONFIG_RTCP_SEND_RR)
+static void rtcp_send_rr_if_due(uint64_t now_us)
+{
+    if (!s_rtcp_rr_peer_valid || rtcp_sock < 0)
+    {
+        return;
+    }
+    if (s_rtcp_rr_next_due_us == 0 || now_us < s_rtcp_rr_next_due_us)
+    {
+        return;
+    }
+
+    uint8_t packet[1500];
+    size_t packet_len = 0;
+    esp_err_t rr_rc = rtcp_build_rr_packet(packet, sizeof(packet), &packet_len);
+    if (rr_rc == ESP_OK && packet_len > 0)
+    {
+        int sent = sendto(rtcp_sock,
+                          packet,
+                          packet_len,
+                          0,
+                          (struct sockaddr *)&s_rtcp_rr_peer_addr,
+                          sizeof(s_rtcp_rr_peer_addr));
+        if (sent < 0)
+        {
+            ESP_LOGW(TAG, "Failed to send RTCP RR: errno %d", errno);
+        }
+        else
+        {
+            ESP_LOGD(TAG, "Sent RTCP RR (%d bytes) to %s:%d",
+                     sent,
+                     inet_ntoa(s_rtcp_rr_peer_addr.sin_addr),
+                     ntohs(s_rtcp_rr_peer_addr.sin_port));
+        }
+    }
+    else if (rr_rc != ESP_ERR_NOT_FINISHED)
+    {
+        ESP_LOGD(TAG, "RTCP RR build skipped (%s)", esp_err_to_name(rr_rc));
+    }
+
+    s_rtcp_rr_next_due_us = now_us + ((uint64_t)CONFIG_RTCP_RR_INTERVAL_MS * 1000ULL);
+}
+#endif
 static size_t opus_max_samples_per_channel(uint32_t sample_rate)
 {
     if (sample_rate == 0)
@@ -503,6 +554,10 @@ static void close_udp_server(void)
         close(rtcp_sock);
         rtcp_sock = -1;
     }
+#if defined(CONFIG_RTCP_SEND_RR)
+    s_rtcp_rr_peer_valid = false;
+    s_rtcp_rr_next_due_us = 0;
+#endif
 #endif
 }
 
@@ -953,6 +1008,17 @@ static void network_process_io(void)
         return; // No data available
     }
 
+#if defined(CONFIG_RTCP_ENABLED) && defined(CONFIG_RTCP_SEND_RR)
+    if (s_rtcp_rr_peer_valid && s_rtcp_rr_next_due_us != 0)
+    {
+        uint64_t now_rr = esp_timer_get_time();
+        if (now_rr >= s_rtcp_rr_next_due_us)
+        {
+            rtcp_send_rr_if_due(now_rr);
+        }
+    }
+#endif
+
     // Data is available, read it
     int len = recvfrom(active_sock, rx_buffer, sizeof(s_rtp_rx_buffer), 0,
                        (struct sockaddr *)&source_addr, &socklen);
@@ -979,6 +1045,14 @@ static void network_process_io(void)
         {
             ESP_LOGI(TAG, "RTCP packet parsed successfully");
         }
+#if defined(CONFIG_RTCP_SEND_RR)
+        s_rtcp_rr_peer_addr = source_addr;
+        s_rtcp_rr_peer_valid = true;
+        if (s_rtcp_rr_next_due_us == 0)
+        {
+            s_rtcp_rr_next_due_us = esp_timer_get_time() + ((uint64_t)CONFIG_RTCP_RR_INTERVAL_MS * 1000ULL);
+        }
+#endif
         return; // RTCP packets don't contain audio data
     }
 #endif
@@ -1061,17 +1135,12 @@ static void network_process_io(void)
     }
 
     // Track sequence numbers and update RTCP RX stats
-#ifdef CONFIG_RTCP_ENABLED
-    // Capture arrival time as soon as possible and convert to RTP tick units
-    uint64_t arrival_mono_us = esp_timer_get_time();
-    uint32_t arrival_rtp_ticks = (uint32_t)((arrival_mono_us * (uint64_t)CONFIG_SAMPLE_RATE) / 1000000ULL);
-#endif
     uint16_t seq = ntohs(rtp->seq_num);
     uint32_t rtp_timestamp = ntohl(rtp->timestamp);
 #ifdef CONFIG_RTCP_ENABLED
     // Update RTCP-backed receiver stats (extended seq, loss, jitter)
+    bool marker_bit = RTP_MARKER(rtp->mpt);
     uint32_t ssrc = ntohl(rtp->ssrc);
-    rtcp_update_rx_stats(ssrc, seq, rtp_timestamp, arrival_rtp_ticks);
 
     // Primary SSRC hygiene (decimated): consider switching when not filtering by SSRC
     static uint32_t primary_decimator = 0;
@@ -1140,6 +1209,10 @@ static void network_process_io(void)
         ESP_LOGW(TAG, "No audio payload in RTP packet");
         return;
     }
+
+#ifdef CONFIG_RTCP_ENABLED
+    rtcp_update_rx_stats(ssrc, seq, rtp_timestamp, (size_t)payload_len, marker_bit);
+#endif
 
     uint8_t *payload_ptr = (uint8_t *)&rx_buffer[header_size];
     uint8_t payload_type = RTP_PT(rtp->mpt);
@@ -1399,7 +1472,7 @@ esp_err_t network_init(void)
                                                               NULL,
                                                               7,
                                                               &s_opus_decode_task,
-                                                              0);
+                                                              1);
         if (opus_task_result != pdPASS)
         {
             ESP_LOGE(TAG, "Failed to create Opus decode task");

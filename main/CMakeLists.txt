@@ -105,6 +105,7 @@ idf_component_register(SRCS "esp32-rtp.c"
                            "mdns/mdns_service.c"
                            "mdns/mdns_discovery.c"
                            "sender/network_out.c"
+                           "rtp/live555_bridge.cpp"
                            "sender/wav_streamer.c"
                            "web/web_server.c"
                            ${WEB_ROUTES_SRCS}

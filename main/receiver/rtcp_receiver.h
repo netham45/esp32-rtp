@@ -2,6 +2,8 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include "sdkconfig.h"
 #include "esp_err.h"
 
 #ifdef __cplusplus
@@ -208,7 +210,11 @@ void rtcp_update_rtp_stats(uint32_t ssrc, uint16_t seq_num);
  * @param rtp_ts 32-bit RTP timestamp (host order)
  * @param arrival_rtp_ticks Arrival time converted to RTP tick units
  */
-void rtcp_update_rx_stats(uint32_t ssrc, uint16_t seq, uint32_t rtp_ts, uint32_t arrival_rtp_ticks);
+void rtcp_update_rx_stats(uint32_t ssrc,
+                          uint16_t seq,
+                          uint32_t rtp_ts,
+                          size_t payload_len,
+                          bool marker_bit);
 
 /**
  * @brief Get snapshot of receiver-side stats for an SSRC.
@@ -266,6 +272,23 @@ bool rtcp_consider_primary_switch(uint32_t candidate_ssrc, uint32_t *new_primary
  * @brief Cleanup RTCP receiver
  */
 void rtcp_deinit(void);
+
+#ifdef CONFIG_RTCP_ENABLED
+void rtcp_on_network_ip(uint32_t ipv4_addr_be);
+void rtcp_on_network_down(void);
+esp_err_t rtcp_build_rr_packet(uint8_t *buffer, size_t buffer_len, size_t *packet_len);
+#else
+static inline void rtcp_on_network_ip(uint32_t ipv4_addr_be) {
+    (void)ipv4_addr_be;
+}
+static inline void rtcp_on_network_down(void) {}
+static inline esp_err_t rtcp_build_rr_packet(uint8_t *buffer, size_t buffer_len, size_t *packet_len) {
+    (void)buffer;
+    (void)buffer_len;
+    (void)packet_len;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+#endif
 
 #ifdef __cplusplus
 }

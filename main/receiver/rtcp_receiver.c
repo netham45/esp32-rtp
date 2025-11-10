@@ -8,6 +8,8 @@
 #include <sys/time.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "esp_netif.h"
+#include "rtp/live555_bridge.h"
 
 // SR freshness threshold (ms). Use Kconfig if defined; default to 15000 ms.
 #ifndef CONFIG_RTCP_SR_MAX_AGE_MS
@@ -31,6 +33,10 @@
 #endif
 #ifndef CONFIG_RTCP_PLL_OFFSET_STEP_LIMIT_US
 #define CONFIG_RTCP_PLL_OFFSET_STEP_LIMIT_US 200
+#endif
+
+#ifndef CONFIG_RTP_PCM_PAYLOAD_TYPE
+#define CONFIG_RTP_PCM_PAYLOAD_TYPE 127
 #endif
 
 // Outlier/step detection thresholds (ms); compile-time defaults if Kconfig not present
@@ -82,6 +88,7 @@ static const char *TAG = "rtcp_receiver";
 // RTP unwrap/internal constants (local to this file)
 #define RTP_WRAP_THRESHOLD (0x80000000u / 2)    // half-range to disambiguate wrap
 #define RTP_REORDER_TOL_TICKS (CONFIG_SAMPLE_RATE / 10) // ~100ms worth of RTP ticks at 48kHz
+#define LIVE555_RTCP_SESSION_BW_BPS 128000U
 
 // Optional detailed logging for unwrapping
 #ifdef CONFIG_RTCP_LOG_UNWRAP
@@ -107,6 +114,8 @@ static const char *TAG = "rtcp_receiver";
 // RTCP receiver state
 static rtcp_state_t rtcp_state;
 static SemaphoreHandle_t rtcp_mutex = NULL;
+static live555_bridge_receiver_t *s_live555_rx = NULL;
+static uint32_t s_live555_ipv4 = 0;
 
 // Forward declaration: low-rate RTCP structured summary
 static void rtcp_log_summary_if_due(void);
@@ -190,9 +199,12 @@ esp_err_t rtcp_init(void) {
     // Initialize state
     xSemaphoreTake(rtcp_mutex, portMAX_DELAY);
     memset(&rtcp_state, 0, sizeof(rtcp_state));
+    xSemaphoreGive(rtcp_mutex);
+
+    xSemaphoreTake(rtcp_mutex, portMAX_DELAY);
     rtcp_state.initialized = true;
     xSemaphoreGive(rtcp_mutex);
-    
+
     ESP_LOGI(TAG, "RTCP receiver initialized (max %d sources)", RTCP_MAX_SSRC_SOURCES);
     return ESP_OK;
 }
@@ -261,6 +273,65 @@ static rtcp_sync_info_t* find_or_allocate_sync_info(uint32_t ssrc) {
     return NULL;
 }
 
+static esp_err_t rtcp_try_create_bridge(void) {
+    if (!rtcp_mutex) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    xSemaphoreTake(rtcp_mutex, portMAX_DELAY);
+    if (s_live555_rx != NULL) {
+        xSemaphoreGive(rtcp_mutex);
+        return ESP_OK;
+    }
+    if (s_live555_ipv4 == 0) {
+        xSemaphoreGive(rtcp_mutex);
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    live555_bridge_set_ipv4(s_live555_ipv4);
+
+    live555_bridge_receiver_config_t bridge_cfg = {
+        .sample_rate = CONFIG_SAMPLE_RATE,
+        .payload_type = CONFIG_RTP_PCM_PAYLOAD_TYPE,
+        .local_ssrc = 0,
+        .rtcp_bandwidth_bps = LIVE555_RTCP_SESSION_BW_BPS,
+        .cname = "esp32-rtp-recv",
+    };
+
+    live555_bridge_receiver_t *new_handle = NULL;
+    esp_err_t rc = live555_bridge_receiver_create(&bridge_cfg, &new_handle);
+    if (rc == ESP_OK) {
+        s_live555_rx = new_handle;
+        ESP_LOGI(TAG, "live555 RTCP bridge initialized (ip=0x%08X)", s_live555_ipv4);
+    } else {
+        ESP_LOGE(TAG, "Failed to init live555 RTCP bridge: %s", esp_err_to_name(rc));
+    }
+    xSemaphoreGive(rtcp_mutex);
+    return rc;
+}
+
+static void rtcp_apply_live555_stats_locked(rtcp_sync_info_t *sync,
+                                            const live555_bridge_rx_stats_t *stats) {
+    if (!sync || !stats) {
+        return;
+    }
+
+    sync->seq_initialized = true;
+    sync->seq_base = stats->base_seq;
+    sync->ext_max_seq = stats->ext_max_seq;
+    sync->max_seq = (stats->ext_max_seq & 0xFFFFu);
+    sync->cycles = (stats->ext_max_seq & 0xFFFF0000u);
+    sync->jitter_ts = stats->jitter_ticks;
+    sync->cumulative_lost = stats->cumulative_lost;
+
+    uint32_t expected = (stats->ext_max_seq - stats->base_seq) + 1U;
+    int64_t received = (int64_t)expected - (int64_t)stats->cumulative_lost;
+    if (received < 0) {
+        received = 0;
+    }
+    sync->received_pkts = (uint32_t)received;
+}
+
 // Internal helper: reseed mapping and reset PLL under rtcp_mutex
 static void rtcp_reseed_mapping_locked(rtcp_sync_info_t* s, int64_t new_b, bool reset_slope) {
     if (!s) return;
@@ -291,6 +362,18 @@ esp_err_t rtcp_parse_packet(const uint8_t *packet, size_t len) {
     if (!rtcp_state.initialized) {
         ESP_LOGE(TAG, "RTCP not initialized");
         return ESP_ERR_INVALID_STATE;
+    }
+
+    if (rtcp_mutex) {
+        xSemaphoreTake(rtcp_mutex, portMAX_DELAY);
+        live555_bridge_receiver_t *bridge = s_live555_rx;
+        if (bridge) {
+            esp_err_t bridge_rc = live555_bridge_receiver_note_rtcp(bridge, packet, len);
+            if (bridge_rc != ESP_OK) {
+                ESP_LOGW(TAG, "live555 RTCP ingest failed: %s", esp_err_to_name(bridge_rc));
+            }
+        }
+        xSemaphoreGive(rtcp_mutex);
     }
 
     size_t offset = 0;
@@ -836,12 +919,28 @@ void rtcp_update_rtp_stats(uint32_t ssrc, uint16_t seq_num) {
 }
 
 // Update receiver-side stats (RFC 3550): extended seq, cumulative lost, and interarrival jitter
-void rtcp_update_rx_stats(uint32_t ssrc, uint16_t seq, uint32_t rtp_ts, uint32_t arrival_rtp_ticks) {
+void rtcp_update_rx_stats(uint32_t ssrc,
+                          uint16_t seq,
+                          uint32_t rtp_ts,
+                          size_t payload_len,
+                          bool marker_bit) {
     if (!rtcp_state.initialized) {
         return;
     }
 
     xSemaphoreTake(rtcp_mutex, portMAX_DELAY);
+
+    if (s_live555_rx) {
+        esp_err_t bridge_rc = live555_bridge_receiver_note_rtp(s_live555_rx,
+                                                               ssrc,
+                                                               seq,
+                                                               rtp_ts,
+                                                               payload_len,
+                                                               marker_bit);
+        if (bridge_rc != ESP_OK) {
+            ESP_LOGW(TAG, "live555 RTP ingest failed: %s", esp_err_to_name(bridge_rc));
+        }
+    }
 
     uint64_t now_mono = esp_timer_get_time();
     static uint32_t rx_evict_decim = 0;
@@ -857,65 +956,20 @@ void rtcp_update_rx_stats(uint32_t ssrc, uint16_t seq, uint32_t rtp_ts, uint32_t
     // Mark activity on any RTP packet observe
     sync->last_activity_mono_us = now_mono;
 
-    bool wrapped = false;
-    bool large_jump = false;
-
-    // Sequence extension per RFC 3550
-    if (!sync->seq_initialized) {
-        sync->seq_base       = (uint32_t)seq;
-        sync->max_seq        = (uint32_t)seq;
-        sync->cycles         = 0;
-        sync->ext_max_seq    = (uint32_t)seq;
+    live555_bridge_rx_stats_t stats = {0};
+    if (s_live555_rx && live555_bridge_receiver_get_stats(s_live555_rx, ssrc, &stats)) {
+        rtcp_apply_live555_stats_locked(sync, &stats);
+    } else if (!sync->seq_initialized) {
         sync->seq_initialized = true;
+        sync->seq_base = (uint32_t)seq;
+        sync->max_seq = (uint32_t)seq;
+        sync->ext_max_seq = (uint32_t)seq;
     } else {
-        uint16_t max16   = (uint16_t)sync->max_seq;
-        uint16_t udelta  = (uint16_t)(seq - max16); // modulo-16bit difference
-
-        if (udelta < 0x8000u) {
-            // Forward movement or small jump
-            if (seq < max16) {
-                // 16-bit wrap
-                sync->cycles += (1u << 16);
-                wrapped = true;
-            }
-            // Large jump detection (heuristic)
-            if (udelta > RX_SEQ_JUMP_WARN) {
-                large_jump = true;
-            }
-            sync->max_seq = (uint32_t)seq;
-            sync->ext_max_seq = (sync->cycles | (uint32_t)((uint16_t)sync->max_seq));
-        }
-        // Else: very large backward jump; ignore for ext_max_seq update
+        sync->max_seq = (sync->max_seq & 0xFFFF0000u) | (uint32_t)seq;
+        sync->ext_max_seq = sync->max_seq;
     }
 
-    // Packet counters and cumulative loss from receiver view
-    sync->received_pkts++;
-    if (sync->seq_initialized) {
-        uint32_t expected = (sync->ext_max_seq - sync->seq_base) + 1u;
-        sync->cumulative_lost = (int32_t)expected - (int32_t)sync->received_pkts;
-    }
-
-    // Interarrival jitter (RFC 3550 A.8) - in RTP tick units
-    int32_t transit = (int32_t)((int64_t)arrival_rtp_ticks - (int64_t)rtp_ts);
-    if (sync->received_pkts > 1) {
-        int32_t d = transit - (int32_t)sync->transit_prev;
-        if (d < 0) d = -d;
-        // J = J + (|D(i-1,i)| - J) / 16
-        sync->jitter_ts += ((double)d - sync->jitter_ts) / 16.0;
-    }
-    sync->transit_prev = (uint32_t)transit;
-
-#ifdef CONFIG_RTCP_LOG_RX_STATS
-    if (wrapped) {
-        ESP_LOGI(TAG, "SSRC 0x%08X seq wrap: cycles=0x%08X ext_max_seq=0x%08X", ssrc, sync->cycles, sync->ext_max_seq);
-    }
-    if (large_jump) {
-        ESP_LOGW(TAG, "SSRC 0x%08X large seq jump: max_seq=%u -> %u", ssrc, (uint16_t)(sync->max_seq), seq);
-    }
-    if (sync->jitter_ts > (double)RX_JITTER_WARN_TICKS) {
-        ESP_LOGW(TAG, "SSRC 0x%08X high jitter: J=%.2f ticks (thr=%u)", ssrc, sync->jitter_ts, (unsigned)RX_JITTER_WARN_TICKS);
-    }
-#endif
+    sync->last_seq = seq;
 
     xSemaphoreGive(rtcp_mutex);
     rtcp_log_summary_if_due();
@@ -927,22 +981,39 @@ bool rtcp_get_rx_stats(uint32_t ssrc, uint32_t *ext_max_seq, int32_t *cumulative
         return false;
     }
 
-    bool found = false;
+    bool have_stats = false;
+    live555_bridge_rx_stats_t stats = {0};
 
     xSemaphoreTake(rtcp_mutex, portMAX_DELAY);
-    for (int i = 0; i < RTCP_MAX_SSRC_SOURCES; i++) {
-        if (rtcp_state.sync_info[i].valid && rtcp_state.sync_info[i].ssrc == ssrc) {
-            rtcp_sync_info_t *sync = &rtcp_state.sync_info[i];
-            if (ext_max_seq)      *ext_max_seq = sync->ext_max_seq;
-            if (cumulative_lost)  *cumulative_lost = sync->cumulative_lost;
-            if (jitter_ts)        *jitter_ts = sync->jitter_ts;
-            found = true;
-            break;
+    if (s_live555_rx && live555_bridge_receiver_get_stats(s_live555_rx, ssrc, &stats)) {
+        have_stats = true;
+    } else {
+        for (int i = 0; i < RTCP_MAX_SSRC_SOURCES; i++) {
+            if (rtcp_state.sync_info[i].valid && rtcp_state.sync_info[i].ssrc == ssrc) {
+                stats.ext_max_seq = rtcp_state.sync_info[i].ext_max_seq;
+                stats.cumulative_lost = rtcp_state.sync_info[i].cumulative_lost;
+                stats.jitter_ticks = rtcp_state.sync_info[i].jitter_ts;
+                have_stats = true;
+                break;
+            }
         }
     }
     xSemaphoreGive(rtcp_mutex);
 
-    return found;
+    if (!have_stats) {
+        return false;
+    }
+
+    if (ext_max_seq) {
+        *ext_max_seq = stats.ext_max_seq;
+    }
+    if (cumulative_lost) {
+        *cumulative_lost = stats.cumulative_lost;
+    }
+    if (jitter_ts) {
+        *jitter_ts = stats.jitter_ticks;
+    }
+    return true;
 }
  
 // Get synchronization info for a source
@@ -1100,6 +1171,10 @@ esp_err_t rtcp_unwrap_rtp_timestamp(uint32_t ssrc, uint32_t rtp32, uint64_t *rtp
 
 // Cleanup RTCP receiver
 void rtcp_deinit(void) {
+    live555_bridge_receiver_destroy(s_live555_rx);
+    s_live555_rx = NULL;
+    s_live555_ipv4 = 0;
+
     if (rtcp_mutex) {
         xSemaphoreTake(rtcp_mutex, portMAX_DELAY);
         rtcp_state.initialized = false;
@@ -1446,6 +1521,54 @@ bool rtcp_consider_primary_switch(uint32_t candidate_ssrc, uint32_t *new_primary
 
     xSemaphoreGive(rtcp_mutex);
     return switched;
+}
+
+void rtcp_on_network_ip(uint32_t ipv4_addr_be) {
+    if (!rtcp_state.initialized || ipv4_addr_be == 0) {
+        return;
+    }
+
+    xSemaphoreTake(rtcp_mutex, portMAX_DELAY);
+    s_live555_ipv4 = ipv4_addr_be;
+    xSemaphoreGive(rtcp_mutex);
+
+    esp_err_t rc = rtcp_try_create_bridge();
+    if (rc != ESP_OK) {
+        ESP_LOGW(TAG, "RTCP bridge pending until network ready (%s)", esp_err_to_name(rc));
+    }
+}
+
+void rtcp_on_network_down(void) {
+    if (!rtcp_state.initialized) {
+        return;
+    }
+
+    xSemaphoreTake(rtcp_mutex, portMAX_DELAY);
+    s_live555_ipv4 = 0;
+    live555_bridge_set_ipv4(0);
+    if (s_live555_rx) {
+        live555_bridge_receiver_destroy(s_live555_rx);
+        s_live555_rx = NULL;
+        ESP_LOGI(TAG, "live555 RTCP bridge torn down (network down)");
+    }
+    xSemaphoreGive(rtcp_mutex);
+}
+
+esp_err_t rtcp_build_rr_packet(uint8_t *buffer, size_t buffer_len, size_t *packet_len) {
+#ifndef CONFIG_RTCP_ENABLED
+    (void)buffer;
+    (void)buffer_len;
+    (void)packet_len;
+    return ESP_ERR_NOT_SUPPORTED;
+#else
+    if (!buffer || !packet_len) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!rtcp_state.initialized || s_live555_rx == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    return live555_bridge_receiver_build_rr(s_live555_rx, buffer, buffer_len, packet_len);
+#endif
 }
 
 // Low‑rate RTCP structured summary; prints once per CONFIG_RTCP_LOG_SUMMARY_INTERVAL_MS

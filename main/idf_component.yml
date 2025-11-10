@@ -9,3 +9,4 @@ dependencies:
   netham45/ntp: '*'
   netham45/wifi_manager: '*'
   netham45/TS3USB30ERSWR: '*'
+  espressif/sock_utils: '*'

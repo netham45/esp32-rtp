@@ -8,6 +8,9 @@
 #include "../lifecycle_manager.h"
 #include "esp_log.h"
 #include <string.h>
+#ifdef CONFIG_RTCP_ENABLED
+#include "../receiver/rtcp_receiver.h"
+#endif
 
 static const char *TAG = "lifecycle_wifi_adapter";
 
@@ -39,12 +42,18 @@ static void wifi_event_to_lifecycle_handler(wifi_manager_event_t* event, void* u
                      event->data.got_ip.ip,
                      event->data.got_ip.gateway,
                      event->data.got_ip.netmask);
+#ifdef CONFIG_RTCP_ENABLED
+            rtcp_on_network_ip(event->data.got_ip.ip);
+#endif
             lifecycle_manager_post_event(LIFECYCLE_EVENT_WIFI_CONNECTED);
             break;
             
         case WIFI_MANAGER_EVENT_STA_DISCONNECTED:
             ESP_LOGI(TAG, "WiFi STA disconnected (reason: %d) - notifying lifecycle manager",
                      event->data.sta_disconnected.reason);
+#ifdef CONFIG_RTCP_ENABLED
+            rtcp_on_network_down();
+#endif
             lifecycle_manager_post_event(LIFECYCLE_EVENT_WIFI_DISCONNECTED);
             break;
             

@@ -26,6 +26,10 @@
 #include "usb_in.h"
 #include "wav_streamer.h"
 #include "config/config_manager.h"  // For device_mode_t enum
+#ifdef CONFIG_RTCP_ENABLED
+#include "rtp/live555_bridge.h"
+#define RTCP_SR_INTERVAL_MS 5000
+#endif
 
 // RTP header structure (12 bytes)
 typedef struct __attribute__((packed)) {
@@ -100,6 +104,10 @@ static struct sockaddr_in s_sap_addr;
 static char s_device_name[32] = "ESP32-Audio";
 static char s_local_ip[16] = {0};
 static uint64_t s_next_sap_announce_us = 0;
+#ifdef CONFIG_RTCP_ENABLED
+static uint64_t s_next_sr_send_us = 0;
+static live555_bridge_sender_t *s_live555_sender = NULL;
+#endif
 
 // Forward declarations for multicast helper functions
 static bool is_multicast_address(const char *ip_str);
@@ -284,13 +292,6 @@ esp_err_t rtp_sender_init(void)
     
     ESP_LOGI(TAG, "Initializing RTP sender");
     
-    // Generate random RTP state - SSRC stays constant for the session
-    s_rtp_ssrc = esp_random();
-    s_rtp_seq_num = esp_random() & 0xFFFF;
-    s_rtp_timestamp = 0;  // Start timestamp at 0 for cleaner debugging
-    
-    ESP_LOGI(TAG, "RTP SSRC: 0x%08X, Initial seq: %u", s_rtp_ssrc, s_rtp_seq_num);
-    
     // Initialize the socket
     s_sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
     if (s_sock < 0) {
@@ -350,10 +351,52 @@ esp_err_t rtp_sender_init(void)
     s_dest_addr.sin_port = htons(dest_port);
     
     // Check if destination is multicast and join the group if needed
-    if (is_multicast_address(dest_ip)) {
+    bool dest_is_multicast = is_multicast_address(dest_ip);
+    if (dest_is_multicast) {
         ESP_LOGI(TAG, "Detected multicast destination %s, joining multicast group", dest_ip);
         handle_multicast_membership(s_sock, dest_ip, true);
     }
+
+#ifdef CONFIG_RTCP_ENABLED
+    uint16_t rtcp_port = (dest_port == UINT16_MAX) ? dest_port : (uint16_t)(dest_port + 1U);
+
+    live555_bridge_sender_config_t bridge_cfg = {
+        .sample_rate = lifecycle_get_sample_rate(),
+        .payload_type = RTP_PAYLOAD_TYPE,
+        .channels = 2,
+        .rtcp_bandwidth_bps = 0,
+        .payload_name = "L16",
+        .cname = s_device_name,
+        .dest_ipv4 = s_dest_addr.sin_addr.s_addr,
+        .dest_rtcp_port = rtcp_port,
+        .ttl = 1,
+    };
+
+    esp_err_t bridge_rc = live555_bridge_sender_create(&bridge_cfg, &s_live555_sender);
+    if (bridge_rc != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize live555 sender bridge: %s", esp_err_to_name(bridge_rc));
+        if (dest_is_multicast) {
+            handle_multicast_membership(s_sock, dest_ip, false);
+        }
+        close(s_sock);
+        s_sock = -1;
+        close(s_sap_sock);
+        s_sap_sock = -1;
+        return bridge_rc;
+    }
+
+    s_rtp_ssrc = live555_bridge_sender_ssrc(s_live555_sender);
+    s_rtp_seq_num = live555_bridge_sender_initial_seq(s_live555_sender);
+    s_rtp_timestamp = live555_bridge_sender_initial_timestamp(s_live555_sender);
+
+    ESP_LOGI(TAG, "RTP SSRC: 0x%08X, Initial seq: %u ts=%u",
+             s_rtp_ssrc, s_rtp_seq_num, s_rtp_timestamp);
+#else
+    s_rtp_ssrc = esp_random();
+    s_rtp_seq_num = esp_random() & 0xFFFF;
+    s_rtp_timestamp = 0;
+    ESP_LOGI(TAG, "RTP SSRC: 0x%08X, Initial seq: %u", s_rtp_ssrc, s_rtp_seq_num);
+#endif
 
     s_is_sender_initialized = true;
 
@@ -385,6 +428,13 @@ esp_err_t rtp_sender_start(void)
     
     s_is_sender_running = true;
     s_next_sap_announce_us = 0;
+#ifdef CONFIG_RTCP_ENABLED
+    if (s_live555_sender) {
+        s_next_sr_send_us = esp_timer_get_time() + ((uint64_t)RTCP_SR_INTERVAL_MS * 1000ULL);
+    } else {
+        s_next_sr_send_us = 0;
+    }
+#endif
 
     // Create the sender task
     xTaskCreatePinnedToCore(rtp_sender_task, "rtp_sender_task", 8192, NULL, 7, &s_sender_task_handle, 1);
@@ -409,6 +459,14 @@ esp_err_t rtp_sender_stop(void)
     ESP_LOGI(TAG, "Stopping RTP sender");
     
     s_is_sender_running = false;
+#ifdef CONFIG_RTCP_ENABLED
+    s_next_sr_send_us = 0;
+    if (s_live555_sender) {
+        (void)live555_bridge_sender_send_sr(s_live555_sender);
+        live555_bridge_sender_destroy(s_live555_sender);
+        s_live555_sender = NULL;
+    }
+#endif
 
     // Wait for tasks to self-delete (they both check s_is_sender_running and call vTaskDelete(NULL))
     // Give them time to clean up properly
@@ -528,6 +586,20 @@ esp_err_t rtp_sender_update_destination(void)
             }
         }
     }
+
+#ifdef CONFIG_RTCP_ENABLED
+    if (s_live555_sender) {
+        uint8_t ttl = is_multicast ? 15 : 1;
+        uint16_t rtcp_port = (dest_port == UINT16_MAX) ? dest_port : (uint16_t)(dest_port + 1U);
+        esp_err_t bridge_rc = live555_bridge_sender_set_destination(s_live555_sender,
+                                                                    s_dest_addr.sin_addr.s_addr,
+                                                                    rtcp_port,
+                                                                    ttl);
+        if (bridge_rc != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to update live555 RTCP destination: %s", esp_err_to_name(bridge_rc));
+        }
+    }
+#endif
     
     // Save current destination for next update
     strncpy(prev_dest_ip, dest_ip, sizeof(prev_dest_ip) - 1);
@@ -750,7 +822,31 @@ static void rtp_sender_task(void *arg)
             }
 
             // Build RTP packet
+#ifdef CONFIG_RTCP_ENABLED
+            uint16_t seq_before = s_rtp_seq_num;
+            uint32_t ts_before = s_rtp_timestamp;
+#endif
             build_rtp_packet(rtp_packet, (uint8_t*)audio_buffer, CHUNK_SIZE);
+
+#ifdef CONFIG_RTCP_ENABLED
+            if (s_live555_sender) {
+                esp_err_t note_rc = live555_bridge_sender_note_rtp(s_live555_sender,
+                                                                   ts_before,
+                                                                   CHUNK_SIZE,
+                                                                   seq_before);
+                if (note_rc != ESP_OK) {
+                    ESP_LOGW(TAG, "live555 RTP stat update failed: %s", esp_err_to_name(note_rc));
+                }
+                uint64_t now_sr = esp_timer_get_time();
+                if (s_next_sr_send_us != 0 && now_sr >= s_next_sr_send_us) {
+                    esp_err_t sr_rc = live555_bridge_sender_send_sr(s_live555_sender);
+                    if (sr_rc != ESP_OK) {
+                        ESP_LOGW(TAG, "live555 SR send failed: %s", esp_err_to_name(sr_rc));
+                    }
+                    s_next_sr_send_us = now_sr + ((uint64_t)RTCP_SR_INTERVAL_MS * 1000ULL);
+                }
+            }
+#endif
 
             int sent = -1;
             int retry_count = 0;
