@@ -167,7 +167,7 @@ static int generate_sdp_message(char *sdp_buffer, size_t buffer_size)
     // Generate SDP
     int len = snprintf(sdp_buffer, buffer_size,
         "v=0\r\n"
-        "o=- %u %u IN IP4 %s\r\n"
+        "o=- %lu %lu IN IP4 %s\r\n"
         "s=%s\r\n"
         "i=48kHz 16-bit Stereo Audio from %s\r\n"
         "c=IN IP4 %s\r\n"

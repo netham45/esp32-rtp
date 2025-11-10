@@ -72,6 +72,15 @@ if(NOT EXISTS "${OPUS_ROOT}/CMakeLists.txt")
     message(FATAL_ERROR "Opus dependency not found at ${OPUS_ROOT}")
 endif()
 
+set(LIVE555_ROOT "${CMAKE_CURRENT_LIST_DIR}/deps/live555")
+if(NOT EXISTS "${LIVE555_ROOT}")
+    message(FATAL_ERROR "live555 dependency not found at ${LIVE555_ROOT}")
+endif()
+set(LIVE555_CMAKE_FILE "${CMAKE_CURRENT_LIST_DIR}/cmake/live555.cmake")
+if(NOT EXISTS "${LIVE555_CMAKE_FILE}")
+    message(FATAL_ERROR "live555 build helpers not found at ${LIVE555_CMAKE_FILE}")
+endif()
+
 if(NOT DEFINED CMAKE_SCRIPT_MODE_FILE)
     set(OPUS_BUILD_SHARED_LIBRARY OFF CACHE BOOL "Opus: build only the static library" FORCE)
     set(OPUS_BUILD_TESTING OFF CACHE BOOL "Opus: disable tests" FORCE)
@@ -104,10 +113,12 @@ idf_component_register(SRCS "esp32-rtp.c"
                            ${LIFECYCLE_SRCS}
                            ${RECEIVER_SRCS}
                       INCLUDE_DIRS "."
+                      REQUIRES lwip esp_http_server esp_wifi espressif__usb_host_uac cjson nvs_flash esp_timer esp_ringbuf esp_driver_rmt app_update esp_pm esp_driver_gpio esp_psram
                       EMBED_FILES ${WEB_FILES})
 
 if(NOT DEFINED CMAKE_SCRIPT_MODE_FILE)
-    target_link_libraries(${COMPONENT_LIB} PUBLIC opus)
+    include("${LIVE555_CMAKE_FILE}")
+    target_link_libraries(${COMPONENT_LIB} PUBLIC opus live555)
     target_include_directories(${COMPONENT_LIB} PUBLIC "${OPUS_ROOT}/include")
     target_compile_definitions(opus PUBLIC GLOBAL_STACK_SIZE=22000)
 
