@@ -1,0 +1,35 @@
+menu "USB Host UAC"
+    config UAC_PRINTF_CONFIGURATION_DESCRIPTOR
+        bool "Print UAC Configuration Descriptor"
+        default n
+        help
+            Print UAC Configuration Descriptor to console.
+    config UAC_DEV_ADDR_LIST_MAX
+        int "Max USB Device Address List"
+        default 6
+        help
+            Max USB Device Address List to find the UAC device. If more devices are connected.
+            The driver will only use the first UAC_DEV_ADDR_LIST_MAX devices.
+    config UAC_FREQ_NUM_MAX
+        int "Max Number of Frequencies each Alt-interface supports"
+        default 4
+        help
+            Max Number of Frequencies each Alt-interface supports. If the device supports more frequencies,
+            the driver will only use the first UAC_FREQ_NUM_MAX frequencies.
+    config UAC_NUM_ISOC_URBS
+        int "Number of UAC ISOC URBs"
+        default 3
+        help
+            Number of UAC ISOC URBs to use. Fewer URBs could cause audio dropouts.
+            More URBs will increase the RAM usage.
+    config UAC_NUM_PACKETS_PER_URB
+        int "Number of Packets per UAC ISOC URB"
+        default 3
+        help
+            Number of Packets per UAC ISOC URB. It limits the minimum packets each transfer will send.
+    config UAC_RINGBUF_SAFE_DELETE_WAITING_MS
+        int "Ringbuf Safe Delete Waiting Time in ms"
+        default 50
+        help
+            Ringbuf Safe Delay Time in ms. It is used to wait for the ringbuf to be untouched before deleting it.
+endmenu # "USB Host UAC"

@@ -16,7 +16,7 @@ dependencies:
       require: private
       version: '>=4.1'
     source:
-      registry_url: https://components.espressif.com
+      registry_url: https://components.espressif.com/
       type: service
     version: 0.5.3
   espressif/mdns:
@@ -61,33 +61,6 @@ dependencies:
     - esp32s3
     - esp32p4
     version: 0.2.0
-  espressif/usb_host_uac:
-    component_hash: d0fbcada2e962f6f4084cbf111466126eb9bcd712f36524e6f69c9f56b2e206a
-    dependencies:
-    - name: espressif/cmake_utilities
-      registry_url: https://components.espressif.com
-      require: private
-      version: 0.5.*
-    - name: idf
-      require: private
-      version: '>=4.4'
-    - name: espressif/usb
-      registry_url: https://components.espressif.com
-      require: public
-      rules:
-      - if: idf_version >=6.0
-      - if: target not in ["linux"]
-      version: ^1.0.0
-    source:
-      registry_url: https://components.espressif.com/
-      type: service
-    targets:
-    - esp32s2
-    - esp32s3
-    - esp32p4
-    - esp32h4
-    - linux
-    version: 1.3.2
   idf:
     source:
       type: idf
@@ -136,6 +109,12 @@ dependencies:
       path: C:\Users\Nathan Ladwig\Documents\GitHub\esp32-rtp\components\netham45__spdif_out
       type: local
     version: 1.0.0
+  netham45/usb_host_uac:
+    dependencies: []
+    source:
+      path: C:\Users\Nathan Ladwig\Documents\GitHub\esp32-rtp\components\netham45__usb_host_uac
+      type: local
+    version: 1.3.2
   netham45/usb_uac_device_in:
     dependencies: []
     source:
@@ -156,19 +135,20 @@ dependencies:
     version: 1.0.0
 direct_dependencies:
 - espressif/cjson
+- espressif/cmake_utilities
 - espressif/mdns
 - espressif/sock_utils
 - espressif/usb_device_uac
-- espressif/usb_host_uac
 - idf
 - netham45/TS3USB30ERSWR
 - netham45/bq25895
 - netham45/ntp
 - netham45/spdif_in
 - netham45/spdif_out
+- netham45/usb_host_uac
 - netham45/usb_uac_device_in
 - netham45/usb_uac_host_out
 - netham45/wifi_manager
-manifest_hash: 339d3b0bdddcc31a153b31b99a3b0081ceababd13a5c6632214b719ebc7186bf
+manifest_hash: 59b3d135aa35e3e1d318d270eff817038028a894b9bac152b99df89d084aec0f
 target: esp32s3
 version: 2.0.0

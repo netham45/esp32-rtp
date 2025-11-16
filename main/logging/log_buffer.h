@@ -8,8 +8,8 @@
 #include "freertos/semphr.h"
 #include "esp_log.h"
 
-#define LOG_BUFFER_SIZE_DEFAULT (1024) // 4KB
-#define LOG_LINE_MAX_LENGTH 256
+#define LOG_BUFFER_SIZE_DEFAULT (512)
+#define LOG_LINE_MAX_LENGTH 128
 
 typedef struct {
     size_t buffer_size;           // Total buffer size

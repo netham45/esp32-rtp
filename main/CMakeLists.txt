@@ -114,7 +114,7 @@ idf_component_register(SRCS "esp32-rtp.c"
                            ${LIFECYCLE_SRCS}
                            ${RECEIVER_SRCS}
                       INCLUDE_DIRS "."
-                      REQUIRES lwip esp_http_server esp_wifi espressif__usb_host_uac cjson nvs_flash esp_timer esp_ringbuf esp_driver_rmt app_update esp_pm esp_driver_gpio esp_psram
+                      REQUIRES lwip esp_http_server esp_wifi netham45__usb_host_uac cjson nvs_flash esp_timer esp_ringbuf esp_driver_rmt app_update esp_pm esp_driver_gpio esp_psram
                       EMBED_FILES ${WEB_FILES})
 
 if(NOT DEFINED CMAKE_SCRIPT_MODE_FILE)
