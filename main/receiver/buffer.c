@@ -92,31 +92,36 @@ bool push_chunk(uint8_t *chunk) {
   return push_chunk_with_timestamp(chunk, esp_timer_get_time() + 5000);
 }
 
-packet_with_ts_t *pop_chunk() {
+bool buffer_pop_ready(uint64_t now_us, packet_with_ts_t **out_packet) {
+  if (!out_packet) {
+    return false;
+  }
+
   taskENTER_CRITICAL(&buffer_mutex);
   if (packet_buffer_size == 0) {
     taskEXIT_CRITICAL(&buffer_mutex);
     set_underrun();
-    return NULL;
+    return false;
   }
+
   if (is_underrun) {
     taskEXIT_CRITICAL(&buffer_mutex);
-    return NULL;
+    return false;
   }
-  uint8_t max_buffer_size = lifecycle_get_max_buffer_size();
-  while (packet_buffer[packet_buffer_pos].timestamp > esp_timer_get_time()) {
-    taskEXIT_CRITICAL(&buffer_mutex);
-    vTaskDelay(0);
-    taskENTER_CRITICAL(&buffer_mutex);
-  }
-  
-  // Get pointer to current packet
+
   packet_with_ts_t *packet = &packet_buffer[packet_buffer_pos];
-  
+  if (packet->timestamp > now_us) {
+    taskEXIT_CRITICAL(&buffer_mutex);
+    return false;
+  }
+
+  uint8_t max_buffer_size = lifecycle_get_max_buffer_size();
   packet_buffer_size--;
   packet_buffer_pos = (packet_buffer_pos + 1) % max_buffer_size;
   taskEXIT_CRITICAL(&buffer_mutex);
-  return packet;
+
+  *out_packet = packet;
+  return true;
 }
 
 void empty_buffer() {
@@ -124,6 +129,7 @@ void empty_buffer() {
 	packet_buffer_size = 0;
 	received_packets = 0;
 	taskEXIT_CRITICAL(&buffer_mutex);
+	set_underrun();
 }
 
 void setup_buffer() {

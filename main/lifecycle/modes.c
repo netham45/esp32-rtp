@@ -4,6 +4,7 @@
 #include "../receiver/audio_out.h"
 #include "../receiver/buffer.h"
 #include "../receiver/network_in.h"
+#include "../receiver/reemission.h"
 #include "../receiver/sap_listener.h"
 #include "../sender/network_out.h"
 #include "../config/config_manager.h"
@@ -300,6 +301,8 @@ static esp_err_t stop_mode_receiver_usb(void) {
     ESP_LOGI(TAG, "Stopping USB receiver mode...");
     
     esp_err_t ret;
+
+    reemission_stop();
     
     ret = usb_out_stop();
     if (ret != ESP_OK) {
@@ -416,6 +419,8 @@ static esp_err_t stop_mode_receiver_spdif(void) {
         ESP_LOGE(TAG, "Failed to stop visualizer: %s", esp_err_to_name(ret));
     }
     
+    reemission_stop();
+
     // Stop SAP listener
     ret = sap_listener_stop();
     if (ret != ESP_OK) {

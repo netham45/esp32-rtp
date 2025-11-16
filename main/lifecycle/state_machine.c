@@ -13,7 +13,6 @@
 #include "../sender/network_out.h"
 #include "../receiver/sap_listener.h"
 #include "../receiver/network_in.h"
-#include "../receiver/audio_out.h"
 #include "ntp_client.h"
 #include "bq25895_integration.h"
 #include "freertos/FreeRTOS.h"
@@ -412,7 +411,6 @@ static bool lifecycle_run_hot_loop_tasks(void) {
     }
 
     network_in_tick();
-    audio_out_tick();
     return true;
 }
 

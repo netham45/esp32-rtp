@@ -21,7 +21,14 @@ void setup_buffer();
 bool push_chunk(uint8_t *chunk);
 bool push_chunk_with_timestamp(uint8_t *chunk, uint64_t timestamp);
 bool push_chunk_with_skip(uint8_t *chunk, uint64_t timestamp, uint16_t skip_bytes);
-packet_with_ts_t *pop_chunk();  // Now returns the whole struct
+/**
+ * @brief Pop the next packet if it is ready to be played
+ *
+ * The packet is considered ready when its timestamp is in the past relative
+ * to the supplied current time. When no packet is available (empty buffer,
+ * underrun or future timestamp) the function returns false.
+ */
+bool buffer_pop_ready(uint64_t now_us, packet_with_ts_t **out_packet);
 void empty_buffer();
 
 /**

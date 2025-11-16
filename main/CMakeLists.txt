@@ -65,6 +65,7 @@ set (RECEIVER_SRCS
     "receiver/network_in.c"
     "receiver/sap_listener.c"
     "receiver/rtcp_receiver.c"
+    "receiver/reemission.c"
 )
 
 set(OPUS_ROOT "${CMAKE_CURRENT_LIST_DIR}/deps/opus")

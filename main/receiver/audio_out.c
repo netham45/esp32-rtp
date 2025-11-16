@@ -11,6 +11,7 @@
 #include "usb_out.h"
 #include "sdkconfig.h"
 #include "esp_timer.h"
+#include "reemission.h"
 
 // Low-rate summary interval default if not provided by Kconfig (declared in rtcp_receiver.c as well)
 #ifndef CONFIG_AUDIO_OUT_LOG_SUMMARY_INTERVAL_MS
@@ -29,6 +30,7 @@ uint32_t silence_duration_ms = 0;
 TickType_t last_audio_time = 0;
 static bool s_audio_tick_enabled = false;
 static void audio_drop_buffered_audio(void);
+static void audio_handle_silence_tick(TickType_t current_tick);
 
 // Low-rate Audio structured summary; prints once per CONFIG_AUDIO_OUT_LOG_SUMMARY_INTERVAL_MS
 static void audio_log_summary_if_due(void) {
@@ -176,10 +178,7 @@ void audio_direct_write(uint8_t *data) {
 }
 
 static void audio_drop_buffered_audio(void) {
-    packet_with_ts_t *packet = pop_chunk();
-    while (packet) {
-        packet = pop_chunk();
-    }
+    empty_buffer();
 }
 
 static void audio_mark_usb_unavailable(void) {
@@ -209,97 +208,83 @@ static void audio_try_resume_after_usb_pause(void) {
     }
 }
 
-static void audio_process_iteration(void) {
-    // Periodic Audio summary (low rate)
+static void audio_process_iteration(uint64_t now_us) {
     audio_log_summary_if_due();
+
+    TickType_t current_time = xTaskGetTickCount();
 
     if (!playing) {
         if (s_paused_for_usb) {
             audio_drop_buffered_audio();
         }
+        audio_handle_silence_tick(current_time);
         return;
     }
 
     device_mode_t mode = lifecycle_get_device_mode();
     if (mode == MODE_RECEIVER_USB && !usb_out_is_ready()) {
         audio_mark_usb_unavailable();
+        audio_handle_silence_tick(current_time);
         return;
     }
 
-    TickType_t current_time = xTaskGetTickCount();
-    bool processed_audio = false;
-    uint32_t packets_available = (!is_underrun && packet_buffer_size > 0) ? (uint32_t)packet_buffer_size : 0;
-    uint32_t packets_to_process = packets_available > 2 ? 2 : packets_available;
+    packet_with_ts_t *packet = NULL;
+    if (buffer_pop_ready(now_us, &packet)) {
+        if (is_silent) {
+            is_silent = false;
+        }
+        silence_duration_ms = 0;
+        last_audio_time = current_time;
 
-    if (packets_to_process > 0) {
-        // Limit the amount of audio drained per tick so other tasks stay responsive.
-        for (uint32_t packets_processed = 0; packets_processed < packets_to_process; packets_processed++) {
-            packet_with_ts_t *packet = pop_chunk();
-            if (!packet) {
-                ESP_LOGW(TAG, "Expected buffered audio but pop_chunk returned NULL");
-                break;
-            }
+        if (packet->skip_bytes >= PCM_CHUNK_SIZE) {
+            ESP_LOGE(TAG, "Invalid skip_bytes %u >= chunk size %d, dropping packet",
+                    packet->skip_bytes, PCM_CHUNK_SIZE);
+            return;
+        }
 
-            processed_audio = true;
-            mode = lifecycle_get_device_mode();
+        uint8_t *audio_start = packet->packet_buffer + packet->skip_bytes;
+        int audio_len = PCM_CHUNK_SIZE - packet->skip_bytes;
 
-            if (is_silent) {
-                is_silent = false;
-            }
-            silence_duration_ms = 0;
-            last_audio_time = current_time;
+        if (packet->skip_bytes > 0) {
+            ESP_LOGI(TAG, "Audio trim: skipping %u bytes, playing %d bytes (%.2f ms trimmed)",
+                    packet->skip_bytes, audio_len,
+                    (float)packet->skip_bytes / 192.0f);
 
-            if (packet->skip_bytes >= PCM_CHUNK_SIZE) {
-                ESP_LOGE(TAG, "Invalid skip_bytes %u >= chunk size %d, dropping packet",
-                        packet->skip_bytes, PCM_CHUNK_SIZE);
-                return;
-            }
+            static uint32_t total_skipped_bytes = 0;
+            static uint32_t skip_count = 0;
+            total_skipped_bytes += packet->skip_bytes;
+            skip_count++;
 
-            uint8_t *audio_start = packet->packet_buffer + packet->skip_bytes;
-            int audio_len = PCM_CHUNK_SIZE - packet->skip_bytes;
-
-            if (packet->skip_bytes > 0) {
-                ESP_LOGI(TAG, "Audio trim: skipping %u bytes, playing %d bytes (%.2f ms trimmed)",
-                        packet->skip_bytes, audio_len,
-                        (float)packet->skip_bytes / 192.0f);
-
-                static uint32_t total_skipped_bytes = 0;
-                static uint32_t skip_count = 0;
-                total_skipped_bytes += packet->skip_bytes;
-                skip_count++;
-
-                if (skip_count % 100 == 0) {
-                    ESP_LOGI(TAG, "Trim summary: %u packets trimmed, avg %u bytes/packet (%.2f ms/packet)",
-                            skip_count, total_skipped_bytes / skip_count,
-                            (float)(total_skipped_bytes / skip_count) / 192.0f);
-                }
-            }
-
-            if (mode == MODE_RECEIVER_USB) {
-                if (usb_out_is_ready()) {
-                    if (audio_len > 0) {
-                        usb_out_write(audio_start, audio_len, portMAX_DELAY);
-                    } else {
-                        ESP_LOGW(TAG, "No audio data to write after skipping %u bytes", packet->skip_bytes);
-                    }
-                } else {
-                    audio_mark_usb_unavailable();
-                    return;
-                }
-            } else if (mode == MODE_RECEIVER_SPDIF) {
-                if (audio_len > 0) {
-                    spdif_write(audio_start, audio_len);
-                } else {
-                    ESP_LOGW(TAG, "No audio data to write after skipping %u bytes", packet->skip_bytes);
-                }
-            } else {
-                ESP_LOGW(TAG, "Audio hot loop running in unsupported mode: %d", mode);
+            if (skip_count % 100 == 0) {
+                ESP_LOGI(TAG, "Trim summary: %u packets trimmed, avg %u bytes/packet (%.2f ms/packet)",
+                        skip_count, total_skipped_bytes / skip_count,
+                        (float)(total_skipped_bytes / skip_count) / 192.0f);
             }
         }
-    }
-    if (processed_audio)
-        return;
 
+        if (audio_len <= 0) {
+            ESP_LOGW(TAG, "No audio data to write after skipping %u bytes", packet->skip_bytes);
+            return;
+        }
+
+        if (mode == MODE_RECEIVER_USB) {
+            if (usb_out_is_ready()) {
+                usb_out_write(audio_start, audio_len, portMAX_DELAY);
+            } else {
+                audio_mark_usb_unavailable();
+            }
+        } else if (mode == MODE_RECEIVER_SPDIF) {
+            spdif_write(audio_start, audio_len);
+        } else {
+            ESP_LOGW(TAG, "Audio hot loop running in unsupported mode: %d", mode);
+        }
+        return;
+    }
+
+    audio_handle_silence_tick(current_time);
+}
+
+static void audio_handle_silence_tick(TickType_t current_time) {
     if (!is_silent) {
         is_silent = true;
         last_audio_time = current_time;
@@ -326,8 +311,6 @@ static void audio_process_iteration(void) {
                 silence_duration_ms);
         last_audio_time = current_time;
     }
-
-    return;
 }
 
 void setup_audio() {
@@ -340,13 +323,19 @@ void setup_audio() {
         silence_duration_ms = 0;
         last_audio_time = xTaskGetTickCount();
         ESP_LOGI(TAG, "Audio hot loop enabled");
+
+        esp_err_t err = reemission_start();
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to start reemission timer: %s", esp_err_to_name(err));
+        }
     } else {
         s_audio_tick_enabled = false;
         ESP_LOGW(TAG, "Audio setup requested for unsupported mode: %d", mode);
+        reemission_stop();
     }
 }
 
-void audio_out_tick(void) {
+void audio_out_reemission_tick(uint64_t now_us) {
     if (!s_audio_tick_enabled) {
         return;
     }
@@ -360,7 +349,5 @@ void audio_out_tick(void) {
         audio_try_resume_after_usb_pause();
     }
 
-    audio_process_iteration();
+    audio_process_iteration(now_us);
 }
-
-
